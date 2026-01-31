@@ -79,3 +79,17 @@ def daily_create_meeting_token(room_name, is_owner, user_id):
         frappe.throw("Daily token missing in response")
 
     return token
+
+def daily_get_room(room_name):
+    api_key, base_url, _, _ = _get_daily_config()
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+
+    r = requests.get(f"{base_url}/rooms/{room_name}", headers=headers, timeout=30)
+    if not r.ok:
+        frappe.throw(f"Daily get room failed: {r.status_code} {r.text}")
+    return r.json()
+
