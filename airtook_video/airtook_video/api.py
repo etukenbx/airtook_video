@@ -1,7 +1,7 @@
 import secrets
 import frappe
 from frappe import _
-from airtook_video.daily import daily_create_room, daily_create_meeting_token
+from .daily import daily_create_room, daily_create_meeting_token
 
 
 def _require_login():
