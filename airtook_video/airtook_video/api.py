@@ -1,10 +1,11 @@
-import secrets
+﻿import secrets
 import frappe
 from frappe import _
 from .daily import daily_create_room, daily_create_meeting_token, daily_get_room
 
 
 SESSION_DTYPE = "Video Consultation Session"
+
 
 def _resolve_department(dept: str | None) -> str | None:
     """
@@ -30,7 +31,7 @@ def _resolve_department(dept: str | None) -> str | None:
     if len(rows) == 1:
         return rows[0]["name"]
 
-    # 3) Starts-with fallback (handles emojis like Nutrition🥗)
+    # 3) Starts-with fallback (handles emojis like NutritionðŸ¥—)
     rows = frappe.get_all(
         "Medical Department",
         filters=[["department", "like", f"{dept}%"]],
@@ -45,6 +46,9 @@ def _resolve_department(dept: str | None) -> str | None:
         f"Ambiguous or unknown Medical Department: '{dept}'. Please specify a valid department.",
         frappe.ValidationError,
     )
+
+    # Unreachable, but keeps type checkers happy
+    return None
 
 
 @frappe.whitelist(methods=["POST"])
@@ -65,12 +69,15 @@ def create_session(patient_appointment=None, department=None, practitioner=None)
         patient = getattr(appt, "patient", None)
         dept = getattr(appt, "department", None) or dept
 
-    # ✅ RESOLVE ONCE, AUTHORITATIVELY
+    # Resolve once, authoritatively
     dept = _resolve_department(dept)
 
-	if dept and not frappe.db.exists("Medical Department", dept):
-    frappe.throw(f"Resolved department does not exist: {dept}", frappe.ValidationError)
-
+    # Defensive check (should already be true if _resolve_department returned a docname)
+    if dept and not frappe.db.exists("Medical Department", dept):
+        frappe.throw(
+            f"Resolved department does not exist: {dept}",
+            frappe.ValidationError,
+        )
 
     # Choose practitioner if not supplied
     prac = practitioner or _pick_practitioner(dept) or None
@@ -80,16 +87,18 @@ def create_session(patient_appointment=None, department=None, practitioner=None)
     room = daily_create_room(room_name)
 
     # Create Session doc
-    doc = frappe.get_doc({
-        "doctype": SESSION_DTYPE,
-        "session_type": session_type,
-        "status": "Waiting",
-        "patient_appointment": patient_appointment,
-        "patient": patient,
-        "practitioner": prac,
-        "department": dept,  # ← already resolved
-        "daily_room_name": room.get("name") or room_name,
-    })
+    doc = frappe.get_doc(
+        {
+            "doctype": SESSION_DTYPE,
+            "session_type": session_type,
+            "status": "Waiting",
+            "patient_appointment": patient_appointment,
+            "patient": patient,
+            "practitioner": prac,
+            "department": dept,  # already resolved
+            "daily_room_name": room.get("name") or room_name,
+        }
+    )
 
     doc.insert(ignore_permissions=True)
 
@@ -102,7 +111,6 @@ def create_session(patient_appointment=None, department=None, practitioner=None)
         "room_name": doc.daily_room_name,
         "room_url": room.get("url"),
     }
-
 
 
 @frappe.whitelist(methods=["POST"])
@@ -121,7 +129,9 @@ def get_join_info(session_id):
 
     # Determine role
     current_user = frappe.session.user
-    practitioner_user = _get_practitioner_user(doc.practitioner) if doc.practitioner else None
+    practitioner_user = (
+        _get_practitioner_user(doc.practitioner) if doc.practitioner else None
+    )
     is_owner = bool(practitioner_user and practitioner_user == current_user)
 
     # Fetch room URL fresh from Daily (since we didn't store it in DocType)
@@ -156,4 +166,6 @@ def quick_consult(department=None):
     - routes to an available practitioner (v1: first Active with user_id)
     """
     _require_login()
-    return create_session(patient_appointment=None, department=department, practitioner=None)
+    return create_session(
+        patient_appointment=None, department=department, practitioner=None
+    )
