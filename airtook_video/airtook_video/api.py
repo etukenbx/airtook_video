@@ -68,6 +68,29 @@ def _resolve_department(dept: str | None) -> str | None:
         frappe.ValidationError,
     )
 
+# -------------------------
+# Debug method
+# -------------------------
+
+@frappe.whitelist(methods=["POST"])
+def debug_department(term=None):
+    _require_login()
+    term = (term or "").strip()
+
+    exact = bool(term and frappe.db.exists("Medical Department", term))
+    rows = frappe.get_all(
+        "Medical Department",
+        filters=[["name", "like", f"{term}%"]],
+        fields=["name"],
+        limit_page_length=10,
+    )
+
+    return {
+        "term": term,
+        "exact_exists": exact,
+        "prefix_matches_count": len(rows),
+        "prefix_matches": [r["name"] for r in rows],
+    }
 
 # -------------------------
 # Core session creation
