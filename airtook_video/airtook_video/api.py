@@ -9,75 +9,42 @@ SESSION_DTYPE = "Video Consultation Session"
 def _resolve_department(dept: str | None) -> str | None:
     """
     Resolve incoming department text (e.g. 'Nutrition') to the
-    Medical Department *docname*, based on the `department` Data field.
+    Medical Department DOCNAME.
     """
     if not dept:
         return None
 
     dept = dept.strip()
 
-    # Match against the `department` Data field (NOT docname)
+    # 1) Exact DOCNAME match
+    if frappe.db.exists("Medical Department", dept):
+        return dept
+
+    # 2) Exact match on `department` Data field
     rows = frappe.get_all(
         "Medical Department",
-        filters=[["department", "like", f"{dept}%"]],
-        fields=["name", "department"],
+        filters={"department": dept},
+        fields=["name"],
         limit_page_length=2,
     )
-
-    # If exactly one match, return its docname
     if len(rows) == 1:
         return rows[0]["name"]
 
-    return None
+    # 3) Starts-with fallback (handles emojis like Nutrition🥗)
+    rows = frappe.get_all(
+        "Medical Department",
+        filters=[["department", "like", f"{dept}%"]],
+        fields=["name"],
+        limit_page_length=2,
+    )
+    if len(rows) == 1:
+        return rows[0]["name"]
 
-
-
-def _require_login():
-    if frappe.session.user == "Guest":
-        frappe.throw(_("Login required"), frappe.PermissionError)
-
-
-def _room_name(prefix="airtook"):
-    return f"{prefix}_{secrets.token_urlsafe(16).replace('-', '').replace('_', '')}".lower()
-
-
-def _get_practitioner_user(practitioner_name: str) -> str | None:
-    """Return linked system user for a Healthcare Practitioner record."""
-    if not practitioner_name:
-        return None
-    try:
-        return frappe.db.get_value("Healthcare Practitioner", practitioner_name, "user_id")
-    except Exception:
-        return None
-
-
-def _pick_practitioner(department: str | None = None) -> str | None:
-    """
-    Basic v1 routing:
-    - pick first Active Healthcare Practitioner with a linked user_id
-    - if department provided, try to match department first
-    """
-    filters = {"status": "Active"}
-    fields = ["name", "user_id", "department"]
-
-    # Try department match first
-    if department:
-        rows = frappe.get_all("Healthcare Practitioner",
-            filters={"status": "Active", "department": department},
-            fields=fields,
-            limit_page_length=50
-        )
-        for r in rows:
-            if r.get("user_id"):
-                return r["name"]
-
-    # Fallback: any active practitioner with user_id
-    rows = frappe.get_all("Healthcare Practitioner", filters=filters, fields=fields, limit_page_length=50)
-    for r in rows:
-        if r.get("user_id"):
-            return r["name"]
-
-    return None
+    # 4) Ambiguous or missing -> hard fail (safe for telemedicine)
+    frappe.throw(
+        f"Ambiguous or unknown Medical Department: '{dept}'. Please specify a valid department.",
+        frappe.ValidationError,
+    )
 
 
 @frappe.whitelist(methods=["POST"])
