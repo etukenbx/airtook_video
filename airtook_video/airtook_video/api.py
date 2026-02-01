@@ -68,8 +68,12 @@ def create_session(patient_appointment=None, department=None, practitioner=None)
     # ✅ RESOLVE ONCE, AUTHORITATIVELY
     dept = _resolve_department(dept)
 
+	if dept and not frappe.db.exists("Medical Department", dept):
+    frappe.throw(f"Resolved department does not exist: {dept}", frappe.ValidationError)
+
+
     # Choose practitioner if not supplied
-    prac = practitioner or _pick_practitioner(dept)
+    prac = practitioner or _pick_practitioner(dept) or None
 
     # Create Daily room
     room_name = _room_name("airtook")
