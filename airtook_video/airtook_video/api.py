@@ -39,8 +39,9 @@ def _require_login():
 
 def _resolve_department(dept: str | None) -> str | None:
     """
-    Resolve incoming department text (e.g. 'Nutrition') to the
-    Medical Department DOCNAME (name). Handles emojis like Nutrition🥗.
+    Resolve incoming department text (e.g. 'Nutrition') to the Medical Department
+    DOCNAME (name). Unicode-safe: does prefix matching in Python (not SQL LIKE),
+    so emojis/encoding won't break matching.
     """
     if not dept:
         return None
@@ -51,22 +52,31 @@ def _resolve_department(dept: str | None) -> str | None:
     if frappe.db.exists("Medical Department", dept):
         return dept
 
-    # 2) Starts-with match on DOCNAME (name) to handle emojis
+    # 2) Unicode-safe prefix match in Python
+    # Fetch a reasonable list of departments and compare with .startswith()
     rows = frappe.get_all(
         "Medical Department",
-        filters=[["name", "like", f"{dept}%"]],
         fields=["name"],
-        limit_page_length=2,
+        limit_page_length=200,
     )
 
-    if len(rows) == 1:
-        return rows[0]["name"]
+    matches = [r["name"] for r in rows if (r.get("name") or "").startswith(dept)]
+
+    if len(matches) == 1:
+        return matches[0]
 
     # 3) Fail loudly if ambiguous or missing
+    if len(matches) > 1:
+        frappe.throw(
+            f"Ambiguous Medical Department: '{dept}'. Matches: {matches}. Please be more specific.",
+            frappe.ValidationError,
+        )
+
     frappe.throw(
-        f"Ambiguous or unknown Medical Department: '{dept}'. Please specify a valid department.",
+        f"Unknown Medical Department: '{dept}'. Please specify a valid department.",
         frappe.ValidationError,
     )
+
 
 # -------------------------
 # Debug method
