@@ -6,6 +6,10 @@ from .daily import daily_create_room, daily_create_meeting_token, daily_get_room
 
 SESSION_DTYPE = "Video Consultation Session"
 
+def _require_login():
+    # Session-based auth check (no Guest access)
+    if frappe.session.user == "Guest":
+        frappe.throw(_("Login required"), frappe.PermissionError)
 
 def _resolve_department(dept: str | None) -> str | None:
     """
