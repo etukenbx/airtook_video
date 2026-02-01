@@ -6,6 +6,39 @@ from .daily import daily_create_room, daily_create_meeting_token, daily_get_room
 
 SESSION_DTYPE = "Video Consultation Session"
 
+def _resolve_department(dept: str | None) -> str | None:
+    if not dept:
+        return None
+
+    dept = dept.strip()
+
+    # Exact match on docname
+    if frappe.db.exists("Medical Department", dept):
+        return dept
+
+    # Try "starts with" match (handles emojis like Nutrition🥗)
+    rows = frappe.get_all(
+        "Medical Department",
+        filters=[["name", "like", f"{dept}%"]],
+        fields=["name"],
+        limit_page_length=2,
+    )
+    if len(rows) == 1:
+        return rows[0]["name"]
+
+    # Try matching the "department" field if it exists in your setup
+    rows = frappe.get_all(
+        "Medical Department",
+        filters=[["department", "like", f"{dept}%"]],
+        fields=["name"],
+        limit_page_length=2,
+    )
+    if len(rows) == 1:
+        return rows[0]["name"]
+
+    return None
+
+
 
 def _require_login():
     if frappe.session.user == "Guest":
@@ -68,7 +101,7 @@ def create_session(patient_appointment=None, department=None, practitioner=None)
     session_type = "Scheduled" if patient_appointment else "Quick Consult"
 
     patient = None
-    dept = department
+    dept = _resolve_department(department)
 
     # Pull from appointment if provided
     if patient_appointment:
@@ -79,6 +112,7 @@ def create_session(patient_appointment=None, department=None, practitioner=None)
 
         # department field exists in your system
         dept = getattr(appt, "department", None) or dept
+	dept = _resolve_department(dept)
 
     # Choose practitioner if not supplied
     prac = practitioner or _pick_practitioner(dept)
@@ -95,7 +129,7 @@ def create_session(patient_appointment=None, department=None, practitioner=None)
         "patient_appointment": patient_appointment,
         "patient": patient,
         "practitioner": prac,
-        "department": dept,
+        "department": _resolve_department(dept),
         "daily_room_name": room.get("name") or room_name,
     })
     doc.insert(ignore_permissions=True)
