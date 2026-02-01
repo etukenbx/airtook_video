@@ -4,35 +4,27 @@ from frappe import _
 from .daily import daily_create_room, daily_create_meeting_token, daily_get_room
 
 
-SESSION_DTYPE = "Video Consultation Session"
+SESSION_DTYPE = "Video Consultdef _resolve_department(dept: str | None) -> str | None:ation Session"
 
 def _resolve_department(dept: str | None) -> str | None:
+    """
+    Resolve incoming department text (e.g. 'Nutrition') to the
+    Medical Department *docname*, based on the `department` Data field.
+    """
     if not dept:
         return None
 
     dept = dept.strip()
 
-    # Exact match on docname
-    if frappe.db.exists("Medical Department", dept):
-        return dept
-
-    # Try "starts with" match (handles emojis like Nutrition🥗)
-    rows = frappe.get_all(
-        "Medical Department",
-        filters=[["name", "like", f"{dept}%"]],
-        fields=["name"],
-        limit_page_length=2,
-    )
-    if len(rows) == 1:
-        return rows[0]["name"]
-
-    # Try matching the "department" field if it exists in your setup
+    # Match against the `department` Data field (NOT docname)
     rows = frappe.get_all(
         "Medical Department",
         filters=[["department", "like", f"{dept}%"]],
-        fields=["name"],
+        fields=["name", "department"],
         limit_page_length=2,
     )
+
+    # If exactly one match, return its docname
     if len(rows) == 1:
         return rows[0]["name"]
 
