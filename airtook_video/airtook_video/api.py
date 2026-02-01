@@ -4,7 +4,7 @@ from frappe import _
 from .daily import daily_create_room, daily_create_meeting_token, daily_get_room
 
 
-SESSION_DTYPE = "Video Consultdef _resolve_department(dept: str | None) -> str | None:ation Session"
+SESSION_DTYPE = "Video Consultation Session"
 
 def _resolve_department(dept: str | None) -> str | None:
     """
@@ -84,27 +84,22 @@ def _pick_practitioner(department: str | None = None) -> str | None:
 def create_session(patient_appointment=None, department=None, practitioner=None):
     """
     Create a session + Daily room.
-    - If patient_appointment provided: Scheduled session
-    - Else: Quick Consult session
-    Returns: session_id, room_name, room_url
     """
     _require_login()
 
     session_type = "Scheduled" if patient_appointment else "Quick Consult"
 
     patient = None
-    dept = _resolve_department(department)
+    dept = department  # raw input first
 
     # Pull from appointment if provided
     if patient_appointment:
         appt = frappe.get_doc("Patient Appointment", patient_appointment)
-
-        # common fields in Healthcare app
         patient = getattr(appt, "patient", None)
-
-        # department field exists in your system
         dept = getattr(appt, "department", None) or dept
-	dept = _resolve_department(dept)
+
+    # ✅ RESOLVE ONCE, AUTHORITATIVELY
+    dept = _resolve_department(dept)
 
     # Choose practitioner if not supplied
     prac = practitioner or _pick_practitioner(dept)
@@ -121,9 +116,10 @@ def create_session(patient_appointment=None, department=None, practitioner=None)
         "patient_appointment": patient_appointment,
         "patient": patient,
         "practitioner": prac,
-        "department": _resolve_department(dept),
+        "department": dept,  # ← already resolved
         "daily_room_name": room.get("name") or room_name,
     })
+
     doc.insert(ignore_permissions=True)
 
     return {
@@ -135,6 +131,7 @@ def create_session(patient_appointment=None, department=None, practitioner=None)
         "room_name": doc.daily_room_name,
         "room_url": room.get("url"),
     }
+
 
 
 @frappe.whitelist(methods=["POST"])
