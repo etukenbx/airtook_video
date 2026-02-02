@@ -9,5 +9,5 @@ app_email = "etuken@airtook.com"
 app_license = "MIT"
 
 website_route_rules = [
-    {"from_route": "/video/<session_id>", "to_route": "video"},
+    {"from_route": "/video/<session_id>", "to_route": "video?session_id=<session_id>"},
 ]
