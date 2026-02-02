@@ -1,0 +1,7 @@
+
+# Local test artifacts
+cookies.txt
+*.cookies.txt
+*.cookie
+*.cookies
+
