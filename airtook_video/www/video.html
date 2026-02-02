@@ -1,0 +1,116 @@
+{% extends "templates/web.html" %}
+
+{% block title %}{{ page_title or "AirTook Video Consultation" }}{% endblock %}
+
+{% block page_content %}
+<div class="container" style="max-width: 1100px; margin-top: 24px; margin-bottom: 48px;">
+  <h2 style="margin-bottom: 8px;">Video Consultation</h2>
+
+  {% if invalid %}
+    <div class="alert alert-danger">
+      Invalid or missing session id. Please use the link provided in your consultation message.
+    </div>
+  {% else %}
+    {% if is_guest %}
+      <div class="alert alert-warning">
+        You need to be logged in to join this consultation.
+        <br />
+        <a class="btn btn-primary btn-sm" style="margin-top: 8px;" href="/login?redirect-to=/video/{{ session_id }}">
+          Login to continue
+        </a>
+      </div>
+    {% endif %}
+
+    <div id="status" class="alert alert-info">Preparing your call…</div>
+
+    <div id="call-wrap" style="display:none; border: 1px solid #e5e7eb; border-radius: 12px; overflow: hidden;">
+      <div id="daily-frame" style="width: 100%; height: 70vh; min-height: 520px;"></div>
+    </div>
+
+    <div style="margin-top: 12px; font-size: 13px; color: #6b7280;">
+      Session: <code>{{ session_id }}</code>
+    </div>
+  {% endif %}
+</div>
+
+<!-- Daily iframe SDK -->
+<script src="https://unpkg.com/@daily-co/daily-js"></script>
+
+<script>
+(function () {
+  const SESSION_ID = "{{ session_id }}";
+  const isGuest = {{ 1 if is_guest else 0 }};
+
+  const statusEl = document.getElementById("status");
+  const callWrap = document.getElementById("call-wrap");
+  const frameMount = document.getElementById("daily-frame");
+
+  function setStatus(type, msg) {
+    statusEl.className = "alert alert-" + type;
+    statusEl.textContent = msg;
+  }
+
+  async function getJoinInfo() {
+    const res = await fetch("/api/method/airtook_video.airtook_video.api.get_join_info", {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ session_id: SESSION_ID })
+    });
+
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error("Join info fetch failed (" + res.status + "): " + text);
+    }
+
+    const data = await res.json();
+    if (!data || !data.message) throw new Error("Invalid response from get_join_info");
+    return data.message;
+  }
+
+  async function start() {
+    if (!SESSION_ID) {
+      setStatus("danger", "Missing session id.");
+      return;
+    }
+
+    if (isGuest) {
+      setStatus("warning", "Login required to join this consultation.");
+      return;
+    }
+
+    try {
+      setStatus("info", "Fetching secure join token…");
+      const info = await getJoinInfo();
+
+      const roomUrl = info.room_url;
+      const token = info.token;
+
+      if (!roomUrl || !token) {
+        throw new Error("Missing room_url or token in join info.");
+      }
+
+      setStatus("info", "Joining call…");
+
+      const callFrame = window.DailyIframe.createFrame(frameMount, {
+        showLeaveButton: true
+      });
+
+      callWrap.style.display = "block";
+
+      await callFrame.join({
+        url: roomUrl,
+        token: token
+      });
+
+      setStatus("success", "Connected. If you can’t hear/see, allow camera & microphone permissions.");
+    } catch (err) {
+      console.error(err);
+      setStatus("danger", "Unable to join: " + (err && err.message ? err.message : err));
+    }
+  }
+
+  start();
+})();
+</script>
+{% endblock %}
