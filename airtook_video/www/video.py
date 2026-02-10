@@ -3,6 +3,7 @@ import frappe
 
 no_cache = 1  # ensure fresh token fetch + no stale HTML caching
 
+
 def _extract_session_id():
     """
     Works for:
@@ -24,6 +25,7 @@ def _extract_session_id():
 
     return None
 
+
 def get_context(context):
     session_id = _extract_session_id()
     context.session_id = session_id
@@ -32,12 +34,12 @@ def get_context(context):
     # Optional: show basic error if session_id missing
     context.invalid = 0 if session_id else 1
 
-    # If you want to force login before even showing the page:
-    # (You can comment this out later if you support guest join links.)
-    if frappe.session.user == "Guest":
-        # Don’t throw hard 403 here; let the page render and show a login-required message.
-        context.is_guest = 1
-    else:
-        context.is_guest = 0
+    # Read optional magic link key (?k=...)
+    join_key = (frappe.form_dict.get("k") or "").strip()
+    context.join_key = join_key
+    context.allow_guest = 1 if join_key else 0
+
+    # Guest flag for template UI decisions
+    context.is_guest = 1 if frappe.session.user == "Guest" else 0
 
     return context

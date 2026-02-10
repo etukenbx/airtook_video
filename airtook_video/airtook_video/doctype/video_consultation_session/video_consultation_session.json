@@ -1,0 +1,159 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "creation": "2026-02-08 12:35:51.438206",
+ "custom": 1,
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "section_break_u2jo",
+  "session_type",
+  "status",
+  "department",
+  "practitioner",
+  "patient",
+  "daily_room_name",
+  "daily_room_url",
+  "patient_join_key",
+  "patient_join_key_expires_at",
+  "started_at",
+  "ended_at",
+  "patient_user",
+  "booked_by",
+  "allow_magic_link"
+ ],
+ "fields": [
+  {
+   "fieldname": "section_break_u2jo",
+   "fieldtype": "Section Break",
+   "label": "Session"
+  },
+  {
+   "description": "Type of consultation",
+   "fieldname": "session_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Session Type",
+   "options": "Scheduled\nQuick Consult",
+   "reqd": 1
+  },
+  {
+   "description": "Session lifecycle state",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Status",
+   "options": "Waiting\nActive\nEnded\nCancelled",
+   "reqd": 1
+  },
+  {
+   "description": "Medical department for consultation",
+   "fieldname": "department",
+   "fieldtype": "Link",
+   "label": "Department",
+   "options": "Medical Department",
+   "reqd": 1
+  },
+  {
+   "description": "Assigned doctor",
+   "fieldname": "practitioner",
+   "fieldtype": "Link",
+   "label": "Practitioner",
+   "options": "Healthcare Practitioner"
+  },
+  {
+   "description": "Patient user",
+   "fieldname": "patient",
+   "fieldtype": "Link",
+   "label": "Patient",
+   "options": "Patient"
+  },
+  {
+   "description": "AiTook DailyCo room identifier",
+   "fieldname": "daily_room_name",
+   "fieldtype": "Data",
+   "label": "Daily Room Name"
+  },
+  {
+   "description": "Full Daily room URL",
+   "fieldname": "daily_room_url",
+   "fieldtype": "Data",
+   "label": "Daily Room URL"
+  },
+  {
+   "description": "One-time/temporary token for patient WhatsApp join link",
+   "fieldname": "patient_join_key",
+   "fieldtype": "Data",
+   "label": "Patient Join Key",
+   "read_only": 1
+  },
+  {
+   "description": "Expiry time for patient join key (60 minutes)",
+   "fieldname": "patient_join_key_expires_at",
+   "fieldtype": "Datetime",
+   "label": "Patient Join Key Expires At",
+   "read_only": 1
+  },
+  {
+   "description": "Time the call first became active",
+   "fieldname": "started_at",
+   "fieldtype": "Datetime",
+   "label": "Started At"
+  },
+  {
+   "description": "Time the call ended",
+   "fieldname": "ended_at",
+   "fieldtype": "Datetime",
+   "label": "Ended At"
+  },
+  {
+   "description": "Registered patient account for this consultation. \nEvery session must be tied to a User, even if the patient joins via a magic link.",
+   "fieldname": "patient_user",
+   "fieldtype": "Link",
+   "label": "Patient User",
+   "options": "User",
+   "reqd": 1
+  },
+  {
+   "description": "User who created the consultation (doctor, staff, or patient).\nAutomatically set by the system when applicable.",
+   "fieldname": "booked_by",
+   "fieldtype": "Link",
+   "label": "Booked By",
+   "options": "User"
+  },
+  {
+   "default": "0",
+   "description": "Enable one-time magic link access for elderly or assisted patients.\nMagic links are single-use, time-limited, and tied to the Patient User.",
+   "fieldname": "allow_magic_link",
+   "fieldtype": "Check",
+   "label": "Allow Magic Link"
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-02-09 05:58:22.777427",
+ "modified_by": "obxserver@gmail.com",
+ "module": "AirTook Video",
+ "name": "Video Consultation Session",
+ "owner": "obxserver@gmail.com",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "rows_threshold_for_grid_search": 20,
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": []
+}
