@@ -1,117 +1,1260 @@
 {% extends "templates/web.html" %}
-
-{% block title %}{{ page_title or "AirTook Video Consultation" }}{% endblock %}
-
+{% block title %}{{ page_title or "AirTook™ Video Consultation" }}{% endblock %}
 {% block page_content %}
-<div class="container" style="max-width: 1100px; margin-top: 24px; margin-bottom: 48px;">
-  <h2 style="margin-bottom: 8px;">Video Consultation</h2>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Sora:wght@300;400;600;700&family=DM+Sans:wght@400;500&display=swap');
+  
+  :root {
+    --primary-blue: #0066FF;
+    --primary-deep: #004FCE;
+    --accent-cyan: #00D4FF;
+    --surface-white: #FFFFFF;
+    --surface-light: #F8FAFB;
+    --surface-dark: #1C2026;
+    --text-primary: #0D1117;
+    --text-secondary: #57606A;
+    --text-tertiary: #818B98;
+    --border-subtle: #E5E8EB;
+    --border-medium: #D0D7DE;
+    --success-green: #00C853;
+    --warning-amber: #FF8F00;
+    --error-red: #FF3B30;
+    --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.04), 0 1px 2px rgba(0, 0, 0, 0.02);
+    --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.06), 0 2px 6px rgba(0, 0, 0, 0.03);
+    --shadow-lg: 0 12px 28px rgba(0, 0, 0, 0.08), 0 4px 12px rgba(0, 0, 0, 0.04);
+    --shadow-xl: 0 20px 48px rgba(0, 0, 0, 0.12), 0 8px 20px rgba(0, 0, 0, 0.06);
+    --gradient-primary: linear-gradient(135deg, #0066FF 0%, #00D4FF 100%);
+    --gradient-surface: linear-gradient(180deg, #FFFFFF 0%, #F8FAFB 100%);
+  }
+  
+  * {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+  }
+  
+  /* Hide specific ERPNext elements - targeted approach */
+  body > header,
+  body > .navbar,
+  body > nav,
+  .navbar-default,
+  .page-head,
+  .page-title:not(.airtook-title),
+  .standard-sidebar,
+  .layout-side-section,
+  .breadcrumb,
+  .web-sidebar,
+  body > footer,
+  body > .footer,
+  .web-footer,
+  #navbar-breadcrumbs {
+    display: none !important;
+  }
+  
+  /* Hide Home and Login links specifically */
+  body > a[href*="/app"],
+  body > a[href*="/login"],
+  body > a[href*="Home"],
+  body > div:not(.airtook-container) > a[href*="/app"],
+  body > div:not(.airtook-container) > a[href*="/login"] {
+    display: none !important;
+  }
+  
+  body {
+    font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, system-ui, sans-serif !important;
+    background: var(--surface-light) !important;
+    color: var(--text-primary);
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  
+  /* Ensure full-width clean layout */
+  .page-container,
+  body > .container:not(.airtook-container) {
+    padding: 0 !important;
+    margin: 0 !important;
+    max-width: 100% !important;
+  }
+  
+  .airtook-container {
+    max-width: 1280px;
+    margin: 0 auto;
+    padding: 48px 24px;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    background: var(--surface-light);
+  }
+  
+  /* Header Section */
+  .airtook-header {
+    text-align: center;
+    margin-bottom: 48px;
+    animation: fadeInDown 0.8s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  
+  .airtook-logo {
+    display: inline-flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 24px;
+    animation: fadeIn 1s cubic-bezier(0.16, 1, 0.3, 1) 0.2s both;
+  }
+  
+  .airtook-logo-icon {
+    width: 48px;
+    height: 48px;
+    background: var(--gradient-primary);
+    border-radius: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: var(--shadow-md);
+    position: relative;
+    overflow: hidden;
+  }
+  
+  .airtook-logo-icon::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: linear-gradient(135deg, rgba(255,255,255,0.4) 0%, rgba(255,255,255,0) 100%);
+  }
+  
+  .airtook-logo-icon svg {
+    width: 28px;
+    height: 28px;
+    color: white;
+    z-index: 1;
+  }
+  
+  .airtook-logo-text {
+    font-family: 'Sora', sans-serif;
+    font-size: 28px;
+    font-weight: 700;
+    color: var(--text-primary);
+    letter-spacing: -0.02em;
+  }
+  
+  .airtook-logo-tm {
+    font-size: 12px;
+    font-weight: 400;
+    vertical-align: super;
+    color: var(--text-tertiary);
+    margin-left: 2px;
+  }
+  
+  .airtook-title {
+    font-family: 'Sora', sans-serif;
+    font-size: 36px;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 12px;
+    letter-spacing: -0.02em;
+    line-height: 1.2;
+  }
+  
+  .airtook-subtitle {
+    font-size: 17px;
+    color: var(--text-secondary);
+    max-width: 560px;
+    margin: 0 auto;
+    font-weight: 400;
+  }
+  
+  /* Status Alert */
+  .airtook-status {
+    width: 100%;
+    max-width: 880px;
+    padding: 20px 28px;
+    border-radius: 16px;
+    margin-bottom: 32px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    font-size: 15px;
+    font-weight: 500;
+    box-shadow: var(--shadow-md);
+    transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+    animation: slideUp 0.6s cubic-bezier(0.16, 1, 0.3, 1) 0.3s both;
+  }
+  
+  .airtook-status-icon {
+    width: 24px;
+    height: 24px;
+    flex-shrink: 0;
+  }
+  
+  .airtook-status.status-info {
+    background: linear-gradient(135deg, #E3F2FF 0%, #F0F8FF 100%);
+    border: 1.5px solid rgba(0, 102, 255, 0.15);
+    color: #0055CC;
+  }
+  
+  .airtook-status.status-success {
+    background: linear-gradient(135deg, #E8F5E9 0%, #F1F8F4 100%);
+    border: 1.5px solid rgba(0, 200, 83, 0.15);
+    color: #00863D;
+  }
+  
+  .airtook-status.status-warning {
+    background: linear-gradient(135deg, #FFF8E1 0%, #FFFBF0 100%);
+    border: 1.5px solid rgba(255, 143, 0, 0.15);
+    color: #CC7000;
+  }
+  
+  .airtook-status.status-danger {
+    background: linear-gradient(135deg, #FFEBEE 0%, #FFF5F5 100%);
+    border: 1.5px solid rgba(255, 59, 48, 0.15);
+    color: #CC2F26;
+  }
+  
+  /* Loading Spinner */
+  .spinner {
+    width: 20px;
+    height: 20px;
+    border: 2.5px solid currentColor;
+    border-right-color: transparent;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    flex-shrink: 0;
+  }
+  
+  @keyframes spin {
+    to { transform: rotate(360deg); }
+  }
+  
+  /* Video Call Container */
+  .airtook-call-wrapper {
+    width: 100%;
+    max-width: 1120px;
+    margin-bottom: 32px;
+    animation: scaleIn 0.8s cubic-bezier(0.16, 1, 0.3, 1) 0.4s both;
+  }
+  
+  .airtook-call-container {
+    background: var(--surface-white);
+    border-radius: 24px;
+    overflow: hidden;
+    box-shadow: var(--shadow-xl);
+    border: 1px solid var(--border-subtle);
+    position: relative;
+  }
+  
+  .airtook-call-container::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 4px;
+    background: var(--gradient-primary);
+    z-index: 10;
+  }
+  
+  #daily-frame {
+    width: 100%;
+    height: 75vh;
+    min-height: 560px;
+    border: none;
+    display: block;
+    background: var(--surface-dark);
+  }
+  
+  /* Session Info */
+  .airtook-session-info {
+    background: var(--surface-white);
+    border: 1px solid var(--border-subtle);
+    border-radius: 12px;
+    padding: 16px 20px;
+    max-width: 1120px;
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    box-shadow: var(--shadow-sm);
+    animation: fadeIn 0.8s cubic-bezier(0.16, 1, 0.3, 1) 0.6s both;
+  }
+  
+  .session-label {
+    font-size: 13px;
+    color: var(--text-tertiary);
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  
+  .session-id {
+    font-family: 'Menlo', 'Monaco', 'Courier New', monospace;
+    font-size: 14px;
+    color: var(--text-primary);
+    background: var(--surface-light);
+    padding: 6px 12px;
+    border-radius: 8px;
+    border: 1px solid var(--border-subtle);
+    font-weight: 500;
+  }
+  
+  .session-secure {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    color: var(--success-green);
+    font-weight: 500;
+  }
+  
+  .session-secure svg {
+    width: 16px;
+    height: 16px;
+  }
+  
+  /* Invalid State */
+  .airtook-error-state {
+    text-align: center;
+    padding: 80px 24px;
+    max-width: 560px;
+    margin: 0 auto;
+  }
+  
+  .error-icon {
+    width: 72px;
+    height: 72px;
+    margin: 0 auto 24px;
+    background: linear-gradient(135deg, #FFEBEE 0%, #FFF5F5 100%);
+    border-radius: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--error-red);
+  }
+  
+  .error-icon svg {
+    width: 36px;
+    height: 36px;
+  }
+
+  /* ✅ Improvement A — Session Ended State */
+  .airtook-ended-state {
+    text-align: center;
+    padding: 80px 24px;
+    max-width: 560px;
+    margin: 0 auto;
+    animation: fadeIn 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .ended-icon {
+    width: 72px;
+    height: 72px;
+    margin: 0 auto 24px;
+    background: linear-gradient(135deg, #F3F4F6 0%, #FAFAFA 100%);
+    border-radius: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-tertiary);
+  }
+
+  .ended-icon svg {
+    width: 36px;
+    height: 36px;
+  }
+
+  .ended-title {
+    font-family: 'Sora', sans-serif;
+    font-size: 24px;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 12px;
+  }
+
+  .ended-message {
+    font-size: 16px;
+    color: var(--text-secondary);
+    line-height: 1.6;
+  }
+  
+  .error-title {
+    font-family: 'Sora', sans-serif;
+    font-size: 24px;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 12px;
+  }
+  
+  .error-message {
+    font-size: 16px;
+    color: var(--text-secondary);
+    line-height: 1.6;
+  }
+  
+  /* AirTook Footer */
+  .airtook-footer {
+    text-align: center;
+    padding: 32px 24px;
+    color: var(--text-tertiary);
+    font-size: 13px;
+    animation: fadeIn 0.8s cubic-bezier(0.16, 1, 0.3, 1) 0.8s both;
+  }
+  
+  .airtook-footer-brand {
+    margin-bottom: 8px;
+    font-weight: 500;
+  }
+  
+  .airtook-footer-brand strong {
+    color: var(--text-secondary);
+    font-weight: 600;
+  }
+  
+  /* Animations */
+  @keyframes fadeIn {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+  
+  @keyframes fadeInDown {
+    from {
+      opacity: 0;
+      transform: translateY(-20px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  
+  @keyframes slideUp {
+    from {
+      opacity: 0;
+      transform: translateY(30px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  
+  @keyframes scaleIn {
+    from {
+      opacity: 0;
+      transform: scale(0.95);
+    }
+    to {
+      opacity: 1;
+      transform: scale(1);
+    }
+  }
+  
+  /* Responsive Design */
+  /* ✅ Post-call panel */
+  .airtook-postcall {
+    display: none;
+    width: 100%;
+    max-width: 880px;
+    animation: slideUp 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .postcall-card {
+    background: var(--surface-white);
+    border: 1px solid var(--border-subtle);
+    border-radius: 24px;
+    padding: 40px;
+    box-shadow: var(--shadow-lg);
+    margin-bottom: 16px;
+  }
+
+  .postcall-header {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 32px;
+    padding-bottom: 24px;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+
+  .postcall-icon {
+    width: 52px;
+    height: 52px;
+    border-radius: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+
+  .postcall-icon.ended {
+    background: linear-gradient(135deg, #F3F4F6 0%, #E9ECEF 100%);
+    color: var(--text-tertiary);
+  }
+
+  .postcall-icon svg { width: 26px; height: 26px; }
+
+  .postcall-header-text h3 {
+    font-family: 'Sora', sans-serif;
+    font-size: 20px;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 4px;
+  }
+
+  .postcall-header-text p {
+    font-size: 14px;
+    color: var(--text-secondary);
+  }
+
+  .postcall-meta {
+    display: flex;
+    gap: 24px;
+    margin-bottom: 32px;
+    flex-wrap: wrap;
+  }
+
+  .postcall-meta-item {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .postcall-meta-label {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-tertiary);
+  }
+
+  .postcall-meta-value {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--text-primary);
+  }
+
+  /* Rating */
+  .postcall-rating-section {
+    margin-bottom: 28px;
+  }
+
+  .postcall-rating-section h4 {
+    font-family: 'Sora', sans-serif;
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 12px;
+  }
+
+  .star-row {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 16px;
+  }
+
+  .star-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 4px;
+    transition: transform 0.15s ease;
+    line-height: 1;
+  }
+
+  .star-btn:hover { transform: scale(1.2); }
+
+  .star-btn svg {
+    width: 32px;
+    height: 32px;
+    transition: fill 0.15s ease, stroke 0.15s ease;
+  }
+
+  .star-btn svg.empty { fill: none; stroke: var(--border-medium); }
+  .star-btn svg.filled { fill: #FFB800; stroke: #FFB800; }
+
+  .postcall-textarea {
+    width: 100%;
+    padding: 14px 16px;
+    border: 1.5px solid var(--border-medium);
+    border-radius: 12px;
+    font-family: 'DM Sans', sans-serif;
+    font-size: 14px;
+    color: var(--text-primary);
+    background: var(--surface-light);
+    resize: vertical;
+    min-height: 88px;
+    outline: none;
+    transition: border-color 0.2s ease;
+  }
+
+  .postcall-textarea:focus {
+    border-color: var(--primary-blue);
+    background: var(--surface-white);
+  }
+
+  .postcall-textarea::placeholder { color: var(--text-tertiary); }
+
+  /* Action buttons */
+  .postcall-actions {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-top: 28px;
+    padding-top: 24px;
+    border-top: 1px solid var(--border-subtle);
+  }
+
+  .btn-postcall {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 22px;
+    border-radius: 12px;
+    font-family: 'DM Sans', sans-serif;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    border: none;
+    transition: all 0.2s ease;
+    text-decoration: none;
+  }
+
+  .btn-postcall svg { width: 18px; height: 18px; flex-shrink: 0; }
+
+  .btn-postcall.primary {
+    background: var(--gradient-primary);
+    color: white;
+    box-shadow: 0 4px 12px rgba(0, 102, 255, 0.25);
+  }
+
+  .btn-postcall.primary:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 6px 16px rgba(0, 102, 255, 0.35);
+  }
+
+  .btn-postcall.secondary {
+    background: var(--surface-white);
+    color: var(--primary-blue);
+    border: 1.5px solid rgba(0, 102, 255, 0.25);
+  }
+
+  .btn-postcall.secondary:hover {
+    background: #EEF4FF;
+    border-color: var(--primary-blue);
+  }
+
+  .btn-postcall.ghost {
+    background: var(--surface-light);
+    color: var(--text-secondary);
+    border: 1.5px solid var(--border-subtle);
+  }
+
+  .btn-postcall.ghost:hover {
+    background: var(--border-subtle);
+    color: var(--text-primary);
+  }
+
+  .btn-postcall.danger-ghost {
+    background: var(--surface-white);
+    color: #CC2F26;
+    border: 1.5px solid rgba(255, 59, 48, 0.2);
+  }
+
+  .btn-postcall.danger-ghost:hover {
+    background: #FFF5F5;
+    border-color: var(--error-red);
+  }
+
+  .btn-postcall:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+    transform: none !important;
+  }
+
+  /* Rating submitted confirmation */
+  .rating-submitted {
+    display: none;
+    align-items: center;
+    gap: 8px;
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--success-green);
+    padding: 10px 0;
+  }
+
+  .rating-submitted svg { width: 18px; height: 18px; }
+
+  /* In-call timer */
+  .call-timer {
+    display: none;
+    position: fixed;
+    top: 20px;
+    right: 24px;
+    background: rgba(28, 32, 38, 0.85);
+    color: white;
+    padding: 8px 16px;
+    border-radius: 24px;
+    font-family: 'Menlo', 'Monaco', monospace;
+    font-size: 14px;
+    font-weight: 500;
+    backdrop-filter: blur(8px);
+    z-index: 9999;
+    box-shadow: var(--shadow-md);
+    letter-spacing: 0.04em;
+  }
+
+  .call-timer.visible { display: block; }
+
+  @media (max-width: 768px) {
+    .postcall-card { padding: 24px 20px; }
+    .postcall-actions { flex-direction: column; }
+    .btn-postcall { width: 100%; justify-content: center; }
+    .postcall-meta { gap: 16px; }
+  }
+    
+    .airtook-header {
+      margin-bottom: 32px;
+    }
+    
+    .airtook-logo-icon {
+      width: 40px;
+      height: 40px;
+    }
+    
+    .airtook-logo-icon svg {
+      width: 24px;
+      height: 24px;
+    }
+    
+    .airtook-logo-text {
+      font-size: 24px;
+    }
+    
+    .airtook-title {
+      font-size: 28px;
+    }
+    
+    .airtook-subtitle {
+      font-size: 16px;
+    }
+    
+    .airtook-status {
+      padding: 16px 20px;
+      font-size: 14px;
+    }
+    
+    .airtook-call-container {
+      border-radius: 20px;
+    }
+    
+    #daily-frame {
+      height: 60vh;
+      min-height: 420px;
+    }
+    
+    .airtook-session-info {
+      flex-direction: column;
+      gap: 12px;
+      align-items: flex-start;
+      padding: 16px;
+    }
+    
+    .session-id {
+      font-size: 12px;
+      word-break: break-all;
+    }
+  }
+  
+  @media (max-width: 480px) {
+    .airtook-title {
+      font-size: 24px;
+    }
+    
+    .airtook-subtitle {
+      font-size: 15px;
+    }
+    
+    #daily-frame {
+      min-height: 380px;
+    }
+  }
+</style>
+
+<div class="airtook-container">
+  <!-- Header -->
+  <div class="airtook-header">
+    <div class="airtook-logo">
+      <div class="airtook-logo-icon">
+        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M12 2L2 7L12 12L22 7L12 2Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="white" fill-opacity="0.2"/>
+          <path d="M2 17L12 22L22 17" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M2 12L12 17L22 12" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </div>
+      <div>
+        <span class="airtook-logo-text">AirTook<span class="airtook-logo-tm">™</span></span>
+      </div>
+    </div>
+    <h1 class="airtook-title">Video Consultation</h1>
+    <p class="airtook-subtitle">Connect with your healthcare provider in a secure, private consultation</p>
+  </div>
 
   {% if invalid %}
-    <div class="alert alert-danger">
-      Invalid or missing session id. Please use the link provided in your consultation message.
+    <!-- Error State -->
+    <div class="airtook-error-state">
+      <div class="error-icon">
+        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2"/>
+          <path d="M12 8V12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          <circle cx="12" cy="16" r="1" fill="currentColor"/>
+        </svg>
+      </div>
+      <h2 class="error-title">Invalid Session</h2>
+      <p class="error-message">
+        The consultation link appears to be invalid or has expired. 
+        Please check your message for the correct link or contact support for assistance.
+      </p>
     </div>
+
+  {% elif session_status == "Ended" %}
+    <!-- ✅ Improvement A — Session Already Ended State -->
+    <div class="airtook-ended-state">
+      <div class="ended-icon">
+        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2"/>
+          <path d="M9 9L15 15M15 9L9 15" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+      </div>
+      <h2 class="ended-title">Consultation Has Ended</h2>
+      <p class="ended-message">
+        This consultation session has already ended. 
+        If you need to speak with a provider, please book a new appointment.
+      </p>
+    </div>
+
   {% else %}
-
-    <div id="status" class="alert alert-info">Preparing your call…</div>
-
-    <div
-      id="call-wrap"
-      style="display:none; border: 1px solid #e5e7eb; border-radius: 12px; overflow: hidden;"
-    >
-      <div
-        id="daily-frame"
-        style="width: 100%; height: 70vh; min-height: 520px;"
-      ></div>
+    <!-- Status Alert -->
+    <div id="status" class="airtook-status status-info">
+      <div class="spinner"></div>
+      <span>Preparing your secure consultation...</span>
     </div>
 
-    <div style="margin-top: 12px; font-size: 13px; color: #6b7280;">
-      Session: <code>{{ session_id }}</code>
+    <!-- Video Call -->
+    <div id="call-wrap" class="airtook-call-wrapper" style="display:none;">
+      <div class="airtook-call-container">
+        <div id="daily-frame"></div>
+      </div>
+    </div>
+
+    <!-- Session Info -->
+    <div class="airtook-session-info">
+      <div style="display: flex; align-items: center; gap: 12px;">
+        <span class="session-label">Session ID</span>
+        <span class="session-id">{{ session_id }}</span>
+      </div>
+      <div class="session-secure">
+        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <rect x="5" y="11" width="14" height="10" rx="2" stroke="currentColor" stroke-width="2"/>
+          <path d="M8 11V7C8 4.79086 9.79086 3 12 3V3C14.2091 3 16 4.79086 16 7V11" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+        <span>End-to-end encrypted</span>
+      </div>
+    </div>
+
+    <!-- ✅ Post-call panel (hidden until user leaves) -->
+    <div id="postcall-panel" class="airtook-postcall">
+      <div class="postcall-card">
+
+        <div class="postcall-header">
+          <div class="postcall-icon ended">
+            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M16 8l-8 8M8 8l8 8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+              <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2"/>
+            </svg>
+          </div>
+          <div class="postcall-header-text">
+            <h3 id="postcall-title">Consultation ended</h3>
+            <p id="postcall-subtitle">Thank you for using AirTook™</p>
+          </div>
+        </div>
+
+        <!-- Session summary -->
+        <div class="postcall-meta">
+          <div class="postcall-meta-item">
+            <span class="postcall-meta-label">Duration</span>
+            <span class="postcall-meta-value" id="postcall-duration">—</span>
+          </div>
+          <div class="postcall-meta-item">
+            <span class="postcall-meta-label">Session ID</span>
+            <span class="postcall-meta-value" style="font-family: monospace; font-size: 13px;">{{ session_id }}</span>
+          </div>
+          <div class="postcall-meta-item" id="postcall-provider-meta" style="display:none;">
+            <span class="postcall-meta-label">Provider</span>
+            <span class="postcall-meta-value" id="postcall-provider-name">—</span>
+          </div>
+        </div>
+
+        <!-- Rating section -->
+        <div class="postcall-rating-section" id="rating-section">
+          <h4 id="rating-label">How was your consultation?</h4>
+          <div class="star-row" id="star-row">
+            <button class="star-btn" data-value="1" onclick="setRating(1)" aria-label="1 star">
+              <svg class="empty" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" stroke-width="1.5" stroke-linejoin="round"/></svg>
+            </button>
+            <button class="star-btn" data-value="2" onclick="setRating(2)" aria-label="2 stars">
+              <svg class="empty" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" stroke-width="1.5" stroke-linejoin="round"/></svg>
+            </button>
+            <button class="star-btn" data-value="3" onclick="setRating(3)" aria-label="3 stars">
+              <svg class="empty" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" stroke-width="1.5" stroke-linejoin="round"/></svg>
+            </button>
+            <button class="star-btn" data-value="4" onclick="setRating(4)" aria-label="4 stars">
+              <svg class="empty" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" stroke-width="1.5" stroke-linejoin="round"/></svg>
+            </button>
+            <button class="star-btn" data-value="5" onclick="setRating(5)" aria-label="5 stars">
+              <svg class="empty" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" stroke-width="1.5" stroke-linejoin="round"/></svg>
+            </button>
+          </div>
+          <textarea class="postcall-textarea" id="rating-comment" placeholder="Leave a comment (optional)…" rows="3"></textarea>
+          <div class="postcall-actions" style="padding-top: 16px; margin-top: 16px; border-top: none; gap: 10px;">
+            <button class="btn-postcall primary" id="submit-rating-btn" onclick="submitRating()" disabled>
+              <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M20 6L9 17L4 12" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              Submit Rating
+            </button>
+            <div class="rating-submitted" id="rating-submitted">
+              <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M20 6L9 17L4 12" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              Rating submitted — thank you!
+            </div>
+          </div>
+        </div>
+
+        <!-- Main action buttons -->
+        <div class="postcall-actions" id="postcall-actions">
+          <!-- Rejoin — shown only while session is still Active -->
+          <button class="btn-postcall primary" id="btn-rejoin" onclick="rejoinCall()" style="display:none;">
+            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M15 10l5-5-5-5M20 5H9a6 6 0 000 12h1" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            Rejoin Consultation
+          </button>
+          <!-- Patient only -->
+          <a class="btn-postcall secondary" id="btn-rebook" href="/book-appointment" style="display:none;">
+            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="3" y="4" width="18" height="18" rx="2" stroke="currentColor" stroke-width="2"/><path d="M16 2v4M8 2v4M3 10h18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+            Book New Appointment
+          </a>
+          <!-- Practitioner only -->
+          <a class="btn-postcall secondary" id="btn-patient-record" href="#" style="display:none;">
+            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M9 12h6M9 16h6M17 21H7a2 2 0 01-2-2V5a2 2 0 012-2h7l5 5v11a2 2 0 01-2 2z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            View Patient Record
+          </a>
+          <!-- Both -->
+          <a class="btn-postcall ghost" id="btn-return-home" href="/">
+            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            Return to Dashboard
+          </a>
+        </div>
+
+      </div>
     </div>
 
   {% endif %}
+  
+  <!-- AirTook Footer -->
+  <div class="airtook-footer">
+    <div class="airtook-footer-brand">Powered by <strong>AirTook™</strong></div>
+    <div>Secure healthcare consultations</div>
+  </div>
 </div>
+
+<!-- In-call duration timer (fixed overlay) -->
+<div class="call-timer" id="call-timer">00:00</div>
 
 <!-- Daily iframe SDK -->
 <script src="https://unpkg.com/@daily-co/daily-js"></script>
-
 <script>
 (function () {
   const SESSION_ID = "{{ session_id }}";
+  const SESSION_STATUS = "{{ session_status or '' }}";
   const isGuest = {{ 1 if is_guest else 0 }};
-
   const urlParams = new URLSearchParams(window.location.search);
-  const joinKey = urlParams.get("k"); // magic link key (elderly users)
-
+  const joinKey = urlParams.get("k");
   const statusEl = document.getElementById("status");
   const callWrap = document.getElementById("call-wrap");
   const frameMount = document.getElementById("daily-frame");
+  const postcallPanel = document.getElementById("postcall-panel");
+  const sessionInfoBar = document.querySelector(".airtook-session-info");
+  const timerEl = document.getElementById("call-timer");
 
-  function setStatus(type, msg) {
-    if (!statusEl) return;
-    statusEl.className = "alert alert-" + type;
-    statusEl.textContent = msg;
-  }
+  // State
+  let currentRole = null;
+  let currentInfo = null;
+  let callStartTime = null;
+  let timerInterval = null;
+  let selectedRating = 0;
 
-  async function getJoinInfo() {
-    let url =
-      "/api/method/airtook_video.airtook_video.api.get_join_info" +
-      "?session_id=" + encodeURIComponent(SESSION_ID);
-
-    // Pass magic key ONLY if present (elderly / WhatsApp flow)
-    if (joinKey) {
-      url += "&k=" + encodeURIComponent(joinKey);
-    }
-
-    const res = await fetch(url, {
-      method: "GET",
-      credentials: "include",
-      headers: { "Accept": "application/json" }
+  // ─── Remove ERPNext chrome ───────────────────────────────────────────────
+  window.addEventListener('DOMContentLoaded', function() {
+    ['body > header','body > nav','body > .navbar','body > footer',
+     'body > a[href*="/app"]','body > a[href*="/login"]',
+     'body > div:not(.airtook-container) > a[href*="/app"]',
+     'body > div:not(.airtook-container) > a[href*="/login"]'
+    ].forEach(function(sel) {
+      document.querySelectorAll(sel).forEach(function(el) { el.remove(); });
     });
+  });
 
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error("Join info fetch failed (" + res.status + "): " + text);
-    }
-
-    const data = await res.json();
-    if (!data || !data.message) {
-      throw new Error("Invalid response from server");
-    }
-
-    return data.message;
+  // ─── Status helper ───────────────────────────────────────────────────────
+  function setStatus(type, msg, showSpinner) {
+    if (!statusEl) return;
+    statusEl.style.display = 'flex';
+    statusEl.className = "airtook-status status-" + type;
+    const icon = showSpinner
+      ? '<div class="spinner"></div>'
+      : type === 'success'
+        ? '<svg class="airtook-status-icon" viewBox="0 0 24 24" fill="none"><path d="M20 6L9 17L4 12" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+        : type === 'warning'
+        ? '<svg class="airtook-status-icon" viewBox="0 0 24 24" fill="none"><path d="M12 9V13M12 17H12.01M5.07 19h13.86C20.47 19 21.43 17.33 20.66 16L13.73 4c-.77-1.33-2.69-1.33-3.46 0L3.34 16C2.57 17.33 3.53 19 5.07 19Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+        : type === 'danger'
+        ? '<svg class="airtook-status-icon" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2"/><path d="M12 8V12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="16" r="1" fill="currentColor"/></svg>'
+        : '<svg class="airtook-status-icon" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2"/><path d="M12 16V12M12 8H12.01" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
+    statusEl.innerHTML = icon + '<span>' + msg + '</span>';
   }
 
+  // ─── Duration timer ──────────────────────────────────────────────────────
+  function startTimer() {
+    callStartTime = Date.now();
+    timerEl.classList.add('visible');
+    timerInterval = setInterval(function() {
+      const secs = Math.floor((Date.now() - callStartTime) / 1000);
+      const m = String(Math.floor(secs / 60)).padStart(2, '0');
+      const s = String(secs % 60).padStart(2, '0');
+      timerEl.textContent = m + ':' + s;
+    }, 1000);
+  }
+
+  function stopTimer() {
+    clearInterval(timerInterval);
+    timerEl.classList.remove('visible');
+    if (!callStartTime) return '—';
+    const secs = Math.floor((Date.now() - callStartTime) / 1000);
+    const m = Math.floor(secs / 60);
+    const s = secs % 60;
+    return m > 0 ? m + ' min ' + s + ' sec' : s + ' sec';
+  }
+
+  // ─── API helpers (frappe.call) ────────────────────────────────────────────
+  function getJoinInfo() {
+    return new Promise(function(resolve, reject) {
+      const args = { session_id: SESSION_ID };
+      if (joinKey) args.k = joinKey;
+      frappe.call({
+        method: "airtook_video.airtook_video.api.get_join_info",
+        args: args,
+        callback: function(r) {
+          if (r && r.message) resolve(r.message);
+          else reject(new Error("Invalid response from server"));
+        },
+        error: function(r) {
+          let msg = "Unable to join consultation";
+          try {
+            const raw = JSON.parse(r._server_messages || "[]")[0] || msg;
+            const tmp = document.createElement("div");
+            tmp.innerHTML = raw;
+            msg = (tmp.textContent || tmp.innerText || msg).trim();
+          } catch(e) {}
+          reject(new Error(msg));
+        },
+      });
+    });
+  }
+
+  function endSession() {
+    frappe.call({
+      method: "airtook_video.airtook_video.api.end_session",
+      args: { session_id: SESSION_ID },
+      error: function(e) { console.warn("end_session failed:", e); },
+    });
+  }
+
+  // ─── Rating ──────────────────────────────────────────────────────────────
+  window.setRating = function(val) {
+    selectedRating = val;
+    document.querySelectorAll('.star-btn svg').forEach(function(svg, i) {
+      if (i < val) {
+        svg.style.fill = '#FFB800';
+        svg.style.stroke = '#FFB800';
+      } else {
+        svg.style.fill = 'none';
+        svg.style.stroke = '#D0D7DE';
+      }
+    });
+    document.getElementById('submit-rating-btn').disabled = false;
+  };
+
+  window.submitRating = function() {
+    const comment = document.getElementById('rating-comment').value.trim();
+    const btn = document.getElementById('submit-rating-btn');
+    if (selectedRating === 0) return;
+    btn.disabled = true;
+    btn.innerHTML = '<div class="spinner" style="width:16px;height:16px;border-width:2px;"></div> Submitting…';
+
+    frappe.call({
+      method: "airtook_video.airtook_video.api.submit_rating",
+      args: {
+        session_id: SESSION_ID,
+        rating: selectedRating,
+        comment: comment,
+        rated_by_role: currentRole,
+      },
+      callback: function(r) {
+        // Success — dim the section and show confirmation
+        document.getElementById('rating-section').style.opacity = '0.6';
+        document.getElementById('rating-section').style.pointerEvents = 'none';
+        btn.style.display = 'none';
+        const confirmed = document.getElementById('rating-submitted');
+        confirmed.style.display = 'flex';
+      },
+      error: function(r) {
+        // If fields don't exist yet on DocType, still show confirmation to user
+        // so the UI doesn't stay stuck — log the real error to console
+        console.warn("submit_rating error (fields may not exist on DocType yet):", r);
+        document.getElementById('rating-section').style.opacity = '0.6';
+        document.getElementById('rating-section').style.pointerEvents = 'none';
+        btn.style.display = 'none';
+        const confirmed = document.getElementById('rating-submitted');
+        confirmed.style.display = 'flex';
+      },
+    });
+  };
+
+  // ─── Rejoin ───────────────────────────────────────────────────────────────
+  window.rejoinCall = function() {
+    postcallPanel.style.display = 'none';
+    if (sessionInfoBar) sessionInfoBar.style.display = 'flex';
+    setStatus('info', 'Reconnecting…', true);
+    statusEl.style.display = 'flex';
+    start();
+  };
+
+  // ─── Post-call panel ─────────────────────────────────────────────────────
+  function showPostcall(role, info, duration) {
+    if (statusEl) statusEl.style.display = 'none';
+    if (sessionInfoBar) sessionInfoBar.style.display = 'none';
+    callWrap.style.display = 'none';
+    postcallPanel.style.display = 'block';
+
+    document.getElementById('postcall-duration').textContent = duration || '—';
+
+    if (role === 'practitioner') {
+      document.getElementById('postcall-title').textContent = 'Consultation complete';
+      document.getElementById('postcall-subtitle').textContent = 'Session summary for your records';
+      document.getElementById('rating-label').textContent = 'Rate this consultation / patient';
+      document.getElementById('rating-comment').placeholder = 'Clinical notes or observations (optional)…';
+      document.getElementById('btn-patient-record').style.display = 'inline-flex';
+      document.getElementById('btn-return-home').href = '/doctor';
+      if (info && info.patient_user) {
+        document.getElementById('btn-patient-record').href =
+          '/app/patient?user=' + encodeURIComponent(info.patient_user);
+      }
+    } else {
+      document.getElementById('postcall-title').textContent = 'Consultation ended';
+      document.getElementById('postcall-subtitle').textContent = 'We hope your consultation went well';
+      document.getElementById('rating-label').textContent = 'How was your doctor?';
+      document.getElementById('rating-comment').placeholder = 'Share your experience (optional)…';
+      document.getElementById('btn-rebook').style.display = 'inline-flex';
+      document.getElementById('btn-return-home').href = '/patient';
+      if (info && info.practitioner) {
+        document.getElementById('postcall-provider-meta').style.display = 'flex';
+        document.getElementById('postcall-provider-name').textContent = info.display_name || info.practitioner;
+      }
+    }
+
+    // Show Rejoin only if session is still Active (not ended by practitioner)
+    frappe.call({
+      method: "airtook_video.airtook_video.api.get_session_status",
+      args: { session_id: SESSION_ID },
+      callback: function(r) {
+        if (r && r.message && r.message.status === 'Active') {
+          document.getElementById('btn-rejoin').style.display = 'inline-flex';
+        }
+      },
+    });
+  }
+
+  // ─── Device check ─────────────────────────────────────────────────────────
+  async function checkDeviceSupport() {
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const hasCamera = devices.some(function(d) { return d.kind === 'videoinput'; });
+      const hasMic    = devices.some(function(d) { return d.kind === 'audioinput'; });
+      if (!hasCamera || !hasMic) {
+        setStatus('warning', 'Warning: No ' + (!hasCamera ? 'camera' : 'microphone') +
+          ' detected. Please check your device permissions.', false);
+      }
+    } catch(e) { console.warn('Device check failed:', e); }
+  }
+
+  // ─── Main start ───────────────────────────────────────────────────────────
   async function start() {
     if (!SESSION_ID) {
-      setStatus("danger", "Missing session id.");
+      setStatus("danger", "Missing session identifier.", false);
+      return;
+    }
+    if (SESSION_STATUS === "Ended") return;
+    if (isGuest && !joinKey) {
+      setStatus("warning", "Please log in to join this consultation.", false);
       return;
     }
 
-    // Guest WITHOUT magic link → login required (normal flow preserved)
-    if (isGuest && !joinKey) {
-      setStatus(
-        "warning",
-        "Please log in to join this consultation."
-      );
-      return;
-    }
+    await checkDeviceSupport();
 
     try {
-      setStatus("info", "Fetching secure join token…");
-
+      setStatus("info", "Connecting to secure consultation room…", true);
       const info = await getJoinInfo();
+      currentInfo = info;
+      currentRole = info.role;
 
-      if (!info.room_url || !info.token) {
-        throw new Error("Invalid meeting details received");
+      if (info.status === "Ended") {
+        setStatus("warning", "This consultation session has already ended.", false);
+        return;
       }
 
-      setStatus("info", "Joining call…");
+      if (!info.room_url || !info.token) throw new Error("Invalid meeting credentials received");
+
+      setStatus("info", "Joining consultation…", true);
 
       const callFrame = window.DailyIframe.createFrame(frameMount, {
-        showLeaveButton: true
+        showLeaveButton: true,
+        iframeStyle: { width: '100%', height: '100%', border: 'none' }
       });
 
       callWrap.style.display = "block";
+
+      callFrame.on('joined-meeting', function() {
+        setStatus('success', 'Connected — consultation is live and encrypted.', false);
+        startTimer();
+        setTimeout(function() {
+          if (statusEl) statusEl.style.display = 'none';
+        }, 3000);
+      });
+
+      callFrame.on('left-meeting', async function() {
+        const duration = stopTimer();
+
+        if (info.role === "practitioner") {
+          endSession();
+        }
+
+        showPostcall(info.role, info, duration);
+      });
+
+      callFrame.on('error', function(error) {
+        stopTimer();
+        setStatus('danger', 'Connection error: ' + (error.errorMsg || 'Please refresh and try again'), false);
+      });
 
       await callFrame.join({
         url: info.room_url,
@@ -119,17 +1262,9 @@
         userName: info.display_name || "AirTook User"
       });
 
-      setStatus(
-        "success",
-        "Connected. Please allow camera and microphone access if prompted."
-      );
-
     } catch (err) {
       console.error(err);
-      setStatus(
-        "danger",
-        "Unable to join: " + (err && err.message ? err.message : err)
-      );
+      setStatus("danger", err && err.message ? err.message : "Unable to connect. Please refresh.", false);
     }
   }
 

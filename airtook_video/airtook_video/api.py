@@ -14,6 +14,11 @@ SESSION_DTYPE = "Video Consultation Session"
 # Elderly-friendly magic link TTL (minutes)
 JOIN_KEY_TTL_MINUTES = 60
 
+# Session access window rules
+JOIN_EARLY_MINUTES = 10
+SESSION_EXPIRE_AFTER_MINUTES = 60
+DEFAULT_APPT_DURATION_MINUTES = 30
+
 
 # -------------------------
 # Helpers
@@ -152,11 +157,44 @@ def create_session(patient_appointment=None, department=None, practitioner=None,
     patient = None
     dept = department
 
-    # If scheduled via Patient Appointment, pull patient + dept + practitioner from it
+    # If scheduled via Patient Appointment, reuse existing session (if linked),
+    # otherwise pull patient + dept + practitioner from it
     if patient_appointment:
         appt = frappe.get_doc("Patient Appointment", patient_appointment)
+
+        # reuse session if already linked on the appointment
+        existing_session = getattr(appt, "airtook_video_session", None)
+        if existing_session and frappe.db.exists(SESSION_DTYPE, existing_session):
+            existing = frappe.get_doc(SESSION_DTYPE, existing_session, ignore_permissions=True)
+
+            payload = {
+                "session_id": existing.name,
+                "session_type": existing.session_type,
+                "status": existing.status,
+                "department": existing.department,
+                "practitioner": existing.practitioner,
+                "room_name": existing.daily_room_name,
+                "room_url": existing.daily_room_url,
+                "patient_user": existing.patient_user,
+                "booked_by": existing.booked_by,
+                "allow_magic_link": existing.allow_magic_link,
+            }
+
+            # If magic link is enabled and key still exists, return it
+            if existing.get("allow_magic_link") and existing.get("patient_join_key"):
+                payload["patient_join_url"] = f"{get_url()}/video/{existing.name}?k={existing.patient_join_key}"
+                payload["patient_join_expires_at"] = existing.patient_join_key_expires_at
+
+            return payload
+
         patient = getattr(appt, "patient", None)
-        dept = getattr(appt, "department", None) or dept
+
+        # department priority:
+        # 1) appointment.department
+        # 2) passed department argument (aira can pass)
+        # 3) fallback to General Practice
+        dept = getattr(appt, "department", None) or dept or "General Practice"
+
         practitioner = practitioner or getattr(appt, "practitioner", None)
 
     dept = _resolve_department(dept)
@@ -190,7 +228,7 @@ def create_session(patient_appointment=None, department=None, practitioner=None,
     daily_room_name = room.get("name") or room_name
     room_url = room.get("url")
 
-    # Create session doc (includes new fields)
+    # Create session doc
     doc = frappe.get_doc(
         {
             "doctype": SESSION_DTYPE,
@@ -198,9 +236,9 @@ def create_session(patient_appointment=None, department=None, practitioner=None,
             "status": "Waiting",
             "patient_appointment": patient_appointment,
             "patient": patient,
-            "patient_user": final_patient_user,   # NEW (mandatory in DocType)
-            "booked_by": booked_by,               # NEW
-            "allow_magic_link": allow_magic,      # NEW
+            "patient_user": final_patient_user,
+            "booked_by": booked_by,
+            "allow_magic_link": allow_magic,
             "practitioner": prac,
             "department": dept,
             "daily_room_name": daily_room_name,
@@ -208,6 +246,10 @@ def create_session(patient_appointment=None, department=None, practitioner=None,
         }
     )
     doc.insert(ignore_permissions=True)
+
+    # Link back to appointment (if scheduled)
+    if patient_appointment and frappe.db.has_column("Patient Appointment", "airtook_video_session"):
+        frappe.db.set_value("Patient Appointment", patient_appointment, "airtook_video_session", doc.name)
 
     # Magic link is only generated/enabled if allow_magic_link is ON
     join_key = None
@@ -241,6 +283,40 @@ def create_session(patient_appointment=None, department=None, practitioner=None,
         payload["patient_join_expires_at"] = expires_at
 
     return payload
+
+
+# -------------------------
+# Access window helpers
+# -------------------------
+def _get_appt_datetime_and_duration(patient_appointment: str):
+    """Return (start_dt, duration_minutes) from Patient Appointment."""
+    appt = frappe.get_doc("Patient Appointment", patient_appointment)
+    start_date = getattr(appt, "appointment_date", None)
+    start_time = getattr(appt, "appointment_time", None)
+    duration = getattr(appt, "duration", None) or DEFAULT_APPT_DURATION_MINUTES
+    if not start_date or not start_time:
+        return None, int(duration)
+    start_dt = frappe.utils.get_datetime(f"{start_date} {start_time}")
+    return start_dt, int(duration)
+
+
+def _compute_access_window(doc):
+    """Returns (open_from, close_at, kind) — kind is 'scheduled' or 'quick'."""
+    now = now_datetime()
+    if getattr(doc, "patient_appointment", None):
+        start_dt, duration = _get_appt_datetime_and_duration(doc.patient_appointment)
+        if start_dt:
+            open_from = add_to_date(start_dt, minutes=-JOIN_EARLY_MINUTES)
+            close_at = add_to_date(start_dt, minutes=(duration + SESSION_EXPIRE_AFTER_MINUTES))
+            return open_from, close_at, "scheduled"
+    if getattr(doc, "ended_at", None):
+        open_from = add_to_date(doc.ended_at, minutes=-10000)
+        close_at = add_to_date(doc.ended_at, minutes=SESSION_EXPIRE_AFTER_MINUTES)
+        return open_from, close_at, "quick"
+    open_from = add_to_date(now, minutes=-10000)
+    close_at = None
+    return open_from, close_at, "quick"
+
 
 
 # -------------------------
@@ -321,14 +397,56 @@ def get_join_info(session_id, k=None):
 
             # Also enforce patient_user match if set
             if doc.patient_user and doc.patient_user != current_user:
-                # Allow practitioner already handled above; here it's patient role mismatch
                 frappe.throw("Not permitted")
 
             display_name = _get_user_display_name(current_user)
             token_user_id = current_user
 
-    room = daily_get_room(doc.daily_room_name)
-    room_url = room.get("url")
+    # -------------------------
+    # Access window gates (too early / expired)
+    # -------------------------
+    now = now_datetime()
+    open_from, close_at, kind = _compute_access_window(doc)
+
+    if kind == "scheduled" and open_from and now < open_from:
+        frappe.throw("Please join within 10 minutes of your appointment time.")
+
+    if close_at and now > close_at:
+        if doc.status != "Ended":
+            doc.status = "Ended"
+            if not doc.get("ended_at"):
+                doc.db_set("ended_at", now, update_modified=False)
+            doc.save(ignore_permissions=True)
+        frappe.throw("This session has expired. Please book a new appointment.")
+
+    if doc.status == "Ended" and doc.get("ended_at"):
+        hard_close = add_to_date(doc.ended_at, minutes=SESSION_EXPIRE_AFTER_MINUTES)
+        if now > hard_close:
+            frappe.throw("This session has expired. Please book a new appointment.")
+
+    # -------------------------
+    # Ensure room exists (Daily rooms may expire/delete)
+    # Only recreate if still within allowed window
+    # -------------------------
+    room = None
+    room_url = None
+
+    try:
+        room = daily_get_room(doc.daily_room_name)
+        room_url = (room or {}).get("url")
+    except Exception:
+        room = None
+        room_url = None
+
+    if not room_url:
+        if doc.status == "Ended":
+            frappe.throw("This consultation session has ended.")
+        new_room_name = _room_name("airtook")
+        new_room = daily_create_room(new_room_name)
+        doc.daily_room_name = new_room.get("name") or new_room_name
+        doc.daily_room_url = new_room.get("url")
+        doc.save(ignore_permissions=True)
+        room_url = doc.daily_room_url
 
     token = daily_create_meeting_token(
         room_name=doc.daily_room_name,
@@ -359,6 +477,115 @@ def get_join_info(session_id, k=None):
         "display_name": display_name,
         "patient_user": doc.patient_user,
     }
+
+
+# -------------------------
+# API: get session status (lightweight poll for rejoin check)
+# -------------------------
+@frappe.whitelist(allow_guest=True, methods=["GET", "POST"])
+def get_session_status(session_id):
+    if not session_id:
+        frappe.throw("Missing session id")
+    status = frappe.db.get_value(SESSION_DTYPE, session_id, "status")
+    if not status:
+        frappe.throw("Session not found")
+    return {"session_id": session_id, "status": status}
+
+
+# -------------------------
+# API: submit rating (hands off to airtook_core)
+# -------------------------
+@frappe.whitelist(methods=["POST"])
+def submit_rating(session_id, rating, comment=None, rated_by_role=None):
+    """
+    Patient-facing rating entry point called from the post-call panel.
+    Only patient ratings (against the doctor) are forwarded to airtook_core.
+    Practitioner-side notes are stored locally on the session doc only.
+    """
+    _require_login()
+
+    if not session_id:
+        frappe.throw("Missing session id")
+
+    try:
+        rating = int(rating)
+    except (TypeError, ValueError):
+        frappe.throw("Rating must be an integer between 1 and 5", frappe.ValidationError)
+
+    if not (1 <= rating <= 5):
+        frappe.throw("Rating must be between 1 and 5", frappe.ValidationError)
+
+    doc = frappe.get_doc(SESSION_DTYPE, session_id, ignore_permissions=True)
+
+    current_user = frappe.session.user
+    practitioner_user = _get_practitioner_user(doc.practitioner) if doc.practitioner else None
+    is_practitioner = bool(practitioner_user and practitioner_user == current_user)
+    is_patient = bool(doc.patient_user and doc.patient_user == current_user)
+
+    if not is_practitioner and not is_patient:
+        frappe.throw(_("Not permitted to rate this session"), frappe.PermissionError)
+
+    if is_patient:
+        # ── Patient rating a doctor → forward to airtook_core ──────────────
+        if doc.practitioner:
+            import importlib
+            try:
+                core_api = importlib.import_module("airtook_core.api")
+                core_api.submit_doctor_rating(
+                    doctor=doc.practitioner,
+                    rating=rating,
+                    patient_user=current_user,
+                    session=session_id,
+                    comment=comment or "",
+                    source="Video Call",
+                )
+            except Exception as e:
+                frappe.log_error(frappe.get_traceback(), "submit_rating → airtook_core failed")
+                # Log and return gracefully — never block UI on rating failure
+                return {"session_id": session_id, "rating": rating, "rated_by_role": "patient", "warning": str(e)}
+    else:
+        # ── Practitioner notes stored locally on session doc only ───────────
+        doc.db_set("practitioner_rating", rating, update_modified=False)
+        if comment:
+            doc.db_set("practitioner_rating_comment", comment, update_modified=False)
+        frappe.db.commit()
+
+    return {
+        "session_id": session_id,
+        "rating": rating,
+        "rated_by_role": "practitioner" if is_practitioner else "patient",
+    }
+
+
+# -------------------------
+# API: end session (practitioner only)
+# -------------------------
+@frappe.whitelist(methods=["POST"])
+def end_session(session_id):
+    """
+    Marks a Video Consultation Session as Ended.
+    Only the linked practitioner's user may call this.
+    """
+    _require_login()
+
+    if not session_id:
+        frappe.throw("Missing session id")
+
+    doc = frappe.get_doc(SESSION_DTYPE, session_id, ignore_permissions=True)
+
+    # Only the practitioner for this session may end it
+    practitioner_user = _get_practitioner_user(doc.practitioner) if doc.practitioner else None
+    if not practitioner_user or practitioner_user != frappe.session.user:
+        frappe.throw(_("Not permitted"), frappe.PermissionError)
+
+    if doc.status not in ("Ended",):
+        doc.status = "Ended"
+        if not doc.get("ended_at"):
+            doc.db_set("ended_at", now_datetime(), update_modified=False)
+        doc.save(ignore_permissions=True)
+        frappe.db.commit()
+
+    return {"session_id": doc.name, "status": "Ended"}
 
 
 # -------------------------
