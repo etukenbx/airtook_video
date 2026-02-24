@@ -1,6 +1,55 @@
 {% extends "templates/web.html" %}
 {% block title %}{{ page_title or "AirTook™ Video Consultation" }}{% endblock %}
 {% block page_content %}
+
+<script>
+(function () {
+  var token = "{{ csrf_token }}";
+  window.frappe = window.frappe || {};
+  window.frappe.csrf_token = token;
+
+  function getCSRF() {
+    var m = document.querySelector('meta[name="csrf-token"]');
+    return m ? m.content : token;
+  }
+
+  // Fix jQuery / frappe.call (POST to "/")
+  if (window.jQuery) {
+    jQuery.ajaxSetup({
+      beforeSend: function (xhr, settings) {
+        var url = settings.url || "";
+        var sameOrigin = (!url || url.startsWith("/") || url.indexOf("://") === -1);
+        if (sameOrigin && (settings.type || "").toUpperCase() === "POST") {
+          xhr.setRequestHeader("X-Frappe-CSRF-Token", getCSRF());
+        }
+      }
+    });
+  }
+
+  // Fix fetch /api/method/
+  if (window.fetch) {
+    var oldFetch = window.fetch;
+    window.fetch = function (url, opts) {
+      opts = opts || {};
+      var method = (opts.method || "GET").toUpperCase();
+
+      if (method === "POST") {
+        opts.headers = opts.headers || {};
+        if (opts.headers instanceof Headers) {
+          opts.headers.set("X-Frappe-CSRF-Token", getCSRF());
+        } else {
+          opts.headers["X-Frappe-CSRF-Token"] = getCSRF();
+        }
+        opts.credentials = "same-origin";
+      }
+
+      return oldFetch(url, opts);
+    };
+  }
+})();
+</script>
+
+<meta name="csrf-token" content="{{ csrf_token }}">
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Sora:wght@300;400;600;700&family=DM+Sans:wght@400;500&display=swap');
   
@@ -941,7 +990,7 @@
             Rejoin Consultation
           </button>
           <!-- Patient only -->
-          <a class="btn-postcall secondary" id="btn-rebook" href="/book-appointment" style="display:none;">
+          <a class="btn-postcall secondary" id="btn-rebook" href="/aira" style="display:none;">
             <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="3" y="4" width="18" height="18" rx="2" stroke="currentColor" stroke-width="2"/><path d="M16 2v4M8 2v4M3 10h18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
             Book New Appointment
           </a>

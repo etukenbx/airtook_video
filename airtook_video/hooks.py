@@ -13,3 +13,11 @@ website_route_rules = [
     {"from_route": "/video/<session_id>", "to_route": "video"},
 ]
 
+
+
+# Export DB-only customizations into code so they survive DB resets
+fixtures = [
+    {"dt": "DocType", "filters": [["name", "=", "Video Consultation Session"]]},
+    {"dt": "Custom Field", "filters": [["dt", "=", "Patient Appointment"], ["fieldname", "=", "airtook_video_session"]]},
+]
+
