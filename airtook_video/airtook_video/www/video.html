@@ -1,116 +1,915 @@
 {% extends "templates/web.html" %}
-
-{% block title %}{{ page_title or "AirTook Video Consultation" }}{% endblock %}
-
+{% block title %}{{ page_title or "AirTook™ Consultation" }}{% endblock %}
 {% block page_content %}
-<div class="container" style="max-width: 1100px; margin-top: 24px; margin-bottom: 48px;">
-  <h2 style="margin-bottom: 8px;">Video Consultation</h2>
 
-  {% if invalid %}
-    <div class="alert alert-danger">
-      Invalid or missing session id. Please use the link provided in your consultation message.
-    </div>
-  {% else %}
-    {% if is_guest %}
-      <div class="alert alert-warning">
-        You need to be logged in to join this consultation.
-        <br />
-        <a class="btn btn-primary btn-sm" style="margin-top: 8px;" href="/login?redirect-to=/video/{{ session_id }}">
-          Login to continue
-        </a>
-      </div>
-    {% endif %}
-
-    <div id="status" class="alert alert-info">Preparing your call…</div>
-
-    <div id="call-wrap" style="display:none; border: 1px solid #e5e7eb; border-radius: 12px; overflow: hidden;">
-      <div id="daily-frame" style="width: 100%; height: 70vh; min-height: 520px;"></div>
-    </div>
-
-    <div style="margin-top: 12px; font-size: 13px; color: #6b7280;">
-      Session: <code>{{ session_id }}</code>
-    </div>
-  {% endif %}
-</div>
-
-<!-- Daily iframe SDK -->
-<script src="https://unpkg.com/@daily-co/daily-js"></script>
-
+<!-- CSRF injection for web page (no frappe.call — uses $.ajax / fetch only) -->
 <script>
 (function () {
-  const SESSION_ID = "{{ session_id }}";
-  const isGuest = {{ 1 if is_guest else 0 }};
-
-  const statusEl = document.getElementById("status");
-  const callWrap = document.getElementById("call-wrap");
-  const frameMount = document.getElementById("daily-frame");
-
-  function setStatus(type, msg) {
-    statusEl.className = "alert alert-" + type;
-    statusEl.textContent = msg;
+  var token = "{{ csrf_token }}";
+  window.__airtook_csrf = token;
+  window.frappe = window.frappe || {};
+  window.frappe.csrf_token = token;
+  function getCSRF() {
+    return window.__airtook_csrf ||
+      (document.querySelector('meta[name="csrf-token"]') || {}).content || "";
   }
-
-  async function getJoinInfo() {
-    const res = await fetch("/api/method/airtook_video.airtook_video.api.get_join_info", {
-      method: "POST",
-      credentials: "include",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ session_id: SESSION_ID })
+  if (window.jQuery) {
+    jQuery.ajaxSetup({
+      beforeSend: function(xhr, s) {
+        if ((s.type||"").toUpperCase()==="POST")
+          xhr.setRequestHeader("X-Frappe-CSRF-Token", getCSRF());
+      }
     });
+  }
+  if (window.fetch) {
+    var _f = window.fetch;
+    window.fetch = function(url, opts) {
+      opts = opts || {};
+      if ((opts.method||"GET").toUpperCase() === "POST") {
+        opts.headers = opts.headers || {};
+        if (opts.headers instanceof Headers) opts.headers.set("X-Frappe-CSRF-Token", getCSRF());
+        else opts.headers["X-Frappe-CSRF-Token"] = getCSRF();
+        opts.credentials = "same-origin";
+      }
+      return _f(url, opts);
+    };
+  }
+})();
+</script>
 
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error("Join info fetch failed (" + res.status + "): " + text);
-    }
+<meta name="csrf-token" content="{{ csrf_token }}">
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Sora:wght@300;400;600;700&family=DM+Sans:wght@400;500;600&display=swap');
+:root {
+  --orange:    #e8572a;
+  --orange-d:  #d44d24;
+  --orange-l:  rgba(232,87,42,.12);
+  --orange-b:  rgba(232,87,42,.22);
+  --blue:      #0066FF;
+  --cyan:      #00D4FF;
+  --white:     #FFFFFF;
+  --surf:      #F8FAFB;
+  --dark:      #1C2026;
+  --txt:       #0D1117;
+  --txt2:      #57606A;
+  --txt3:      #818B98;
+  --bdr:       #E5E8EB;
+  --bdr2:      #D0D7DE;
+  --green:     #00C853;
+  --red:       #FF3B30;
+  --warn:      #FF8F00;
+  --shd-sm:    0 1px 3px rgba(0,0,0,.04);
+  --shd-md:    0 4px 12px rgba(0,0,0,.08);
+  --shd-lg:    0 12px 28px rgba(0,0,0,.1);
+  --shd-xl:    0 20px 48px rgba(0,0,0,.14);
+  --grad:      linear-gradient(135deg,#e8572a 0%,#f5a327 100%);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body > header, body > .navbar, body > nav, .navbar-default, .page-head,
+.standard-sidebar, .breadcrumb, body > footer, body > .footer { display:none!important; }
+body {
+  font-family:'DM Sans',system-ui,sans-serif!important;
+  background:var(--surf)!important;color:var(--txt);
+  -webkit-font-smoothing:antialiased;
+}
+.at-page{max-width:1200px;margin:0 auto;padding:32px 20px;min-height:100vh;display:flex;flex-direction:column;align-items:center;gap:24px}
 
-    const data = await res.json();
-    if (!data || !data.message) throw new Error("Invalid response from get_join_info");
-    return data.message;
+/* ── header ── */
+.at-hdr{text-align:center;width:100%}
+.at-logo{display:inline-flex;align-items:center;gap:10px;margin-bottom:20px}
+.at-logo-ico{width:42px;height:42px;background:var(--grad);border-radius:12px;display:flex;align-items:center;justify-content:center;box-shadow:var(--shd-md)}
+.at-logo-ico svg{width:24px;height:24px;color:#fff}
+.at-logo-txt{font-family:'Sora',sans-serif;font-size:24px;font-weight:700;color:var(--txt);letter-spacing:-.02em}
+.at-logo-tm{font-size:10px;vertical-align:super;color:var(--txt3)}
+.at-title{font-family:'Sora',sans-serif;font-size:30px;font-weight:600;color:var(--txt);letter-spacing:-.02em;margin-bottom:8px}
+.at-sub{font-size:15px;color:var(--txt2)}
+.at-mode-badge{display:inline-flex;align-items:center;gap:6px;padding:4px 12px;border-radius:20px;font-size:12px;font-weight:600;margin-top:8px}
+.at-mode-badge.video{background:var(--orange-l);border:1px solid var(--orange-b);color:var(--orange)}
+.at-mode-badge.audio{background:rgba(0,200,83,.1);border:1px solid rgba(0,200,83,.2);color:var(--green)}
+
+/* ── status bar ── */
+.at-status{
+  width:100%;max-width:840px;padding:16px 22px;border-radius:14px;
+  display:flex;align-items:center;gap:14px;font-size:14px;font-weight:500;
+  box-shadow:var(--shd-sm);transition:all .3s ease;
+}
+.at-status.info{background:#e3f2ff;border:1.5px solid rgba(0,102,255,.15);color:#0055cc}
+.at-status.success{background:#e8f5e9;border:1.5px solid rgba(0,200,83,.15);color:#00863d}
+.at-status.warn{background:#fff8e1;border:1.5px solid rgba(255,143,0,.15);color:#cc7000}
+.at-status.danger{background:#ffebee;border:1.5px solid rgba(255,59,48,.15);color:#cc2f26}
+.at-status.orange{background:var(--orange-l);border:1.5px solid var(--orange-b);color:var(--orange)}
+.spin{width:18px;height:18px;border:2.5px solid currentColor;border-right-color:transparent;border-radius:50%;animation:spin .8s linear infinite;flex-shrink:0}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* ── video frame ── */
+.at-call-wrap{width:100%;max-width:1100px}
+.at-call-box{background:var(--white);border-radius:22px;overflow:hidden;box-shadow:var(--shd-xl);border:1px solid var(--bdr);position:relative}
+.at-call-box::before{content:'';position:absolute;top:0;left:0;right:0;height:4px;background:var(--grad);z-index:10}
+#daily-frame{width:100%;height:72vh;min-height:520px;border:none;display:block;background:var(--dark)}
+
+/* ── session info bar ── */
+.at-info-bar{
+  background:var(--white);border:1px solid var(--bdr);border-radius:10px;
+  padding:12px 18px;max-width:1100px;width:100%;
+  display:flex;align-items:center;justify-content:space-between;
+  box-shadow:var(--shd-sm);flex-wrap:wrap;gap:10px;
+}
+.at-info-item{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--txt3)}
+.at-info-item strong{color:var(--txt);font-weight:600}
+.at-secure{display:flex;align-items:center;gap:5px;font-size:12px;color:var(--green);font-weight:500}
+
+/* ── in-call overlay timer ── */
+.at-timer{
+  display:none;position:fixed;top:18px;right:22px;
+  background:rgba(28,32,38,.88);color:#fff;
+  padding:7px 16px;border-radius:22px;
+  font-family:'Menlo','Monaco',monospace;font-size:13px;font-weight:500;
+  backdrop-filter:blur(8px);z-index:9999;box-shadow:var(--shd-md);letter-spacing:.04em;
+}
+.at-timer.visible{display:block}
+.at-timer.warn{background:rgba(255,143,0,.92);animation:pulse-warn 1s ease infinite}
+.at-timer.danger{background:rgba(232,87,42,.95);animation:pulse-warn .6s ease infinite}
+@keyframes pulse-warn{0%,100%{opacity:1}50%{opacity:.7}}
+
+/* ── waiting room overlay ── */
+.at-waiting{
+  position:fixed;inset:0;background:rgba(8,9,14,.75);
+  z-index:8000;display:none;align-items:center;justify-content:center;
+  backdrop-filter:blur(4px);
+}
+.at-waiting.visible{display:flex}
+.at-waiting-card{
+  background:#fff;border-radius:20px;padding:40px 36px;text-align:center;
+  max-width:380px;width:90%;box-shadow:var(--shd-xl);
+}
+.at-waiting-pulse{
+  width:64px;height:64px;border-radius:50%;background:var(--orange-l);
+  border:2px solid var(--orange-b);margin:0 auto 20px;
+  display:flex;align-items:center;justify-content:center;
+  animation:waitpulse 2s ease infinite;
+}
+@keyframes waitpulse{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(1.08);opacity:.85}}
+.at-waiting-pulse svg{width:28px;height:28px;color:var(--orange)}
+.at-waiting-card h3{font-family:'Sora',sans-serif;font-size:18px;font-weight:600;color:var(--txt);margin-bottom:8px}
+.at-waiting-card p{font-size:14px;color:var(--txt2);line-height:1.6}
+
+/* ── extension warning overlay ── */
+.at-ext-overlay{
+  position:fixed;inset:0;background:rgba(8,9,14,.7);
+  z-index:9000;display:none;align-items:center;justify-content:center;
+  backdrop-filter:blur(4px);
+}
+.at-ext-overlay.visible{display:flex}
+.at-ext-card{
+  background:#fff;border-radius:22px;padding:36px 32px;
+  max-width:420px;width:92%;box-shadow:var(--shd-xl);text-align:center;
+  animation:slideup .3s cubic-bezier(.16,1,.3,1);
+}
+@keyframes slideup{from{opacity:0;transform:translateY(24px)}to{opacity:1;transform:translateY(0)}}
+.at-ext-icon{width:56px;height:56px;border-radius:16px;background:var(--orange-l);border:1px solid var(--orange-b);display:flex;align-items:center;justify-content:center;margin:0 auto 18px;color:var(--orange)}
+.at-ext-icon svg{width:28px;height:28px}
+.at-ext-card h3{font-family:'Sora',sans-serif;font-size:20px;font-weight:600;color:var(--txt);margin-bottom:8px}
+.at-ext-card p{font-size:14px;color:var(--txt2);margin-bottom:24px;line-height:1.6}
+.at-ext-opts{display:flex;flex-direction:column;gap:10px}
+.at-ext-btn{
+  width:100%;padding:13px;border-radius:12px;font-family:'DM Sans',sans-serif;
+  font-size:14px;font-weight:600;cursor:pointer;border:none;
+  display:flex;align-items:center;justify-content:center;gap:8px;
+  transition:all .18s;
+}
+.at-ext-btn.primary{background:var(--grad);color:#fff;box-shadow:0 4px 14px rgba(232,87,42,.35)}
+.at-ext-btn.primary:hover{transform:translateY(-1px);box-shadow:0 6px 18px rgba(232,87,42,.45)}
+.at-ext-btn.secondary{background:rgba(0,102,255,.07);color:var(--blue);border:1.5px solid rgba(0,102,255,.18)}
+.at-ext-btn.secondary:hover{background:rgba(0,102,255,.12)}
+.at-ext-btn.ghost{background:var(--surf);color:var(--txt2);border:1.5px solid var(--bdr)}
+.at-ext-btn.ghost:hover{background:var(--bdr)}
+.at-ext-btn:disabled{opacity:.5;cursor:not-allowed;transform:none!important}
+.at-ext-grace{font-size:12px;color:var(--txt3);margin-top:8px}
+
+/* ── post-call panel ── */
+.at-postcall{display:none;width:100%;max-width:820px;animation:slideup .5s cubic-bezier(.16,1,.3,1)}
+.at-pc-card{background:#fff;border:1px solid var(--bdr);border-radius:22px;padding:36px;box-shadow:var(--shd-lg);margin-bottom:14px}
+.at-pc-hdr{display:flex;align-items:center;gap:14px;margin-bottom:28px;padding-bottom:22px;border-bottom:1px solid var(--bdr)}
+.at-pc-ico{width:50px;height:50px;border-radius:14px;display:flex;align-items:center;justify-content:center;background:#f3f4f6;color:var(--txt3);flex-shrink:0}
+.at-pc-ico svg{width:24px;height:24px}
+.at-pc-ico.done{background:var(--orange-l);color:var(--orange)}
+.at-pc-title{font-family:'Sora',sans-serif;font-size:19px;font-weight:600;color:var(--txt)}
+.at-pc-sub{font-size:13px;color:var(--txt2);margin-top:3px}
+.at-pc-meta{display:flex;gap:22px;margin-bottom:26px;flex-wrap:wrap}
+.at-pc-meta-item{display:flex;flex-direction:column;gap:3px}
+.at-pc-meta-lbl{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--txt3)}
+.at-pc-meta-val{font-size:15px;font-weight:600;color:var(--txt)}
+
+/* ── star rating ── */
+.at-stars{display:flex;gap:6px;margin:10px 0 14px}
+.at-star{background:none;border:none;cursor:pointer;padding:3px;transition:transform .15s}
+.at-star:hover{transform:scale(1.2)}
+.at-star svg{width:30px;height:30px;fill:none;stroke:var(--bdr2);transition:all .15s}
+.at-star svg.on{fill:#ffb800;stroke:#ffb800}
+.at-pc-textarea{width:100%;padding:12px 14px;border:1.5px solid var(--bdr2);border-radius:10px;font-family:'DM Sans',sans-serif;font-size:13px;color:var(--txt);background:var(--surf);resize:vertical;min-height:80px;outline:none;transition:border-color .2s}
+.at-pc-textarea:focus{border-color:var(--orange);background:#fff}
+.at-pc-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:24px;padding-top:20px;border-top:1px solid var(--bdr)}
+.at-pcbtn{display:inline-flex;align-items:center;gap:7px;padding:11px 20px;border-radius:10px;font-family:'DM Sans',sans-serif;font-size:13px;font-weight:600;cursor:pointer;border:none;transition:all .18s;text-decoration:none}
+.at-pcbtn svg{width:16px;height:16px;flex-shrink:0}
+.at-pcbtn.primary{background:var(--grad);color:#fff;box-shadow:0 3px 10px rgba(232,87,42,.3)}
+.at-pcbtn.primary:hover{transform:translateY(-1px);box-shadow:0 5px 14px rgba(232,87,42,.4)}
+.at-pcbtn.secondary{background:#fff;color:var(--blue);border:1.5px solid rgba(0,102,255,.22)}
+.at-pcbtn.secondary:hover{background:#eef4ff;border-color:var(--blue)}
+.at-pcbtn.ghost{background:var(--surf);color:var(--txt2);border:1.5px solid var(--bdr)}
+.at-pcbtn.ghost:hover{background:var(--bdr)}
+.at-pcbtn:disabled{opacity:.5;cursor:not-allowed;transform:none!important}
+.at-rating-ok{display:none;align-items:center;gap:7px;font-size:13px;font-weight:500;color:var(--green);padding:8px 0}
+.at-rating-ok svg{width:16px;height:16px}
+
+/* ── error / ended states ── */
+.at-err-state,.at-ended-state{text-align:center;padding:72px 20px;max-width:500px;margin:0 auto}
+.at-err-ico,.at-ended-ico{width:68px;height:68px;margin:0 auto 20px;border-radius:18px;display:flex;align-items:center;justify-content:center}
+.at-err-ico{background:#ffebee;color:var(--red)}
+.at-ended-ico{background:#f3f4f6;color:var(--txt3)}
+.at-err-ico svg,.at-ended-ico svg{width:34px;height:34px}
+.at-err-state h2,.at-ended-state h2{font-family:'Sora',sans-serif;font-size:22px;font-weight:600;color:var(--txt);margin-bottom:10px}
+.at-err-state p,.at-ended-state p{font-size:15px;color:var(--txt2);line-height:1.6}
+.at-footer{text-align:center;padding:24px;color:var(--txt3);font-size:12px}
+.at-footer strong{color:var(--txt2)}
+
+@media(max-width:768px){
+  .at-pc-card{padding:22px 18px}
+  .at-pc-actions{flex-direction:column}
+  .at-pcbtn{width:100%;justify-content:center}
+  .at-ext-card{padding:28px 22px}
+  #daily-frame{height:60vh;min-height:400px}
+}
+</style>
+
+<div class="at-page">
+
+  <!-- Header -->
+  <div class="at-hdr">
+    <div class="at-logo">
+      <div class="at-logo-ico">
+        <svg viewBox="0 0 24 24" fill="none"><path d="M12 2L2 7l10 5 10-5-10-5z" stroke="currentColor" stroke-width="2" stroke-linejoin="round" fill="white" fill-opacity=".2"/><path d="M2 17l10 5 10-5M2 12l10 5 10-5" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+      </div>
+      <span class="at-logo-txt">AirTook<span class="at-logo-tm">™</span></span>
+    </div>
+    <h1 class="at-title">
+      {% if consultation_mode == "Audio" %}Audio{% else %}Video{% endif %} Consultation
+    </h1>
+    <p class="at-sub">Secure, private healthcare with AirTook™</p>
+    <div class="at-mode-badge {% if consultation_mode == 'Audio' %}audio{% else %}video{% endif %}">
+      {% if consultation_mode == "Audio" %}
+        <svg width="12" height="12" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v4M8 23h8"/></svg>
+        Audio only
+      {% else %}
+        <svg width="12" height="12" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>
+        Video call
+      {% endif %}
+    </div>
+  </div>
+
+  {% if invalid %}
+  <div class="at-err-state">
+    <div class="at-err-ico"><svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2"/><path d="M12 8v4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="16" r="1" fill="currentColor"/></svg></div>
+    <h2>Invalid Session</h2>
+    <p>The consultation link appears to be invalid or has expired. Please check your appointment confirmation or contact support.</p>
+  </div>
+
+  {% elif session_status == "Ended" %}
+  <div class="at-ended-state">
+    <div class="at-ended-ico"><svg viewBox="0 0 24 24" fill="none"><path d="M9 9l6 6M15 9l-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2"/></svg></div>
+    <h2>Consultation Has Ended</h2>
+    <p>This session has already ended. If you need to speak with a doctor, please book a new appointment.</p>
+  </div>
+
+  {% else %}
+  <!-- Status -->
+  <div id="at-status" class="at-status info" style="max-width:840px;width:100%">
+    <div class="spin"></div>
+    <span>Preparing your secure consultation…</span>
+  </div>
+
+  <!-- Waiting room overlay — shown until both parties join -->
+  <div class="at-waiting" id="at-waiting">
+    <div class="at-waiting-card">
+      <div class="at-waiting-pulse">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+      </div>
+      <h3 id="at-waiting-msg">Waiting for the other party to join…</h3>
+      <p style="margin-top:8px;font-size:13px;color:#818b98">The timer will start once both parties are connected</p>
+    </div>
+  </div>
+
+  <!-- Extension warning overlay -->
+  <div class="at-ext-overlay" id="at-ext-overlay">
+    <div class="at-ext-card">
+      <div class="at-ext-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+      </div>
+      <h3>Your session is ending soon</h3>
+      <p id="at-ext-msg">You have <strong id="at-ext-mins">3</strong> minutes remaining. Would you like to extend?</p>
+      <div class="at-ext-opts">
+        <button class="at-ext-btn primary" id="at-ext-15" onclick="requestExtension(15)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          Extend 15 min — <span id="at-ext-fee-15">calculating…</span>
+          <small style="font-size:10px;opacity:.8;margin-left:4px">(20% off)</small>
+        </button>
+        <button class="at-ext-btn secondary" id="at-ext-30" onclick="requestExtension(30)">
+          Extend 30 min — <span id="at-ext-fee-30">calculating…</span>
+          <small style="font-size:10px;opacity:.7;margin-left:4px">(20% off)</small>
+        </button>
+        <button class="at-ext-btn ghost" onclick="dismissExtension()">We're wrapping up — no thanks</button>
+      </div>
+      <p class="at-ext-grace">If you don't extend, 90 extra seconds will be added to say goodbye.</p>
+    </div>
+  </div>
+
+  <!-- Video frame -->
+  <div id="at-call-wrap" class="at-call-wrap" style="display:none">
+    <div class="at-call-box">
+      <div id="daily-frame"></div>
+    </div>
+  </div>
+
+  <!-- Info bar -->
+  <div class="at-info-bar" id="at-info-bar">
+    <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
+      <div class="at-info-item">Session <strong>{{ session_id }}</strong></div>
+      {% if practitioner_name %}<div class="at-info-item">Doctor <strong>{{ practitioner_name }}</strong></div>{% endif %}
+      {% if appointment_type %}<div class="at-info-item">Type <strong>{{ appointment_type }}</strong></div>{% endif %}
+    </div>
+    <div class="at-secure">
+      <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
+      End-to-end encrypted
+    </div>
+  </div>
+
+  <!-- Post-call panel -->
+  <div id="at-postcall" class="at-postcall">
+    <div class="at-pc-card">
+      <div class="at-pc-hdr">
+        <div class="at-pc-ico done" id="at-pc-ico">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 8l-8 8M8 8l8 8"/><circle cx="12" cy="12" r="10"/></svg>
+        </div>
+        <div>
+          <div class="at-pc-title" id="at-pc-title">Consultation ended</div>
+          <div class="at-pc-sub" id="at-pc-sub">Thank you for using AirTook™</div>
+        </div>
+      </div>
+      <div class="at-pc-meta">
+        <div class="at-pc-meta-item"><span class="at-pc-meta-lbl">Duration</span><span class="at-pc-meta-val" id="at-pc-dur">—</span></div>
+        <div class="at-pc-meta-item"><span class="at-pc-meta-lbl">Session</span><span class="at-pc-meta-val" style="font-family:monospace;font-size:12px">{{ session_id }}</span></div>
+        <div class="at-pc-meta-item" id="at-pc-prov-wrap" style="display:none"><span class="at-pc-meta-lbl">Provider</span><span class="at-pc-meta-val" id="at-pc-prov">—</span></div>
+      </div>
+      <!-- Rating -->
+      <div id="at-rating-sec">
+        <div style="font-family:'Sora',sans-serif;font-size:14px;font-weight:600;color:var(--txt);margin-bottom:6px" id="at-rating-lbl">How was your consultation?</div>
+        <div class="at-stars" id="at-stars">
+          <button class="at-star" data-v="1" onclick="setRating(1)" aria-label="1 star"><svg viewBox="0 0 24 24"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" stroke-width="1.5" stroke-linejoin="round"/></svg></button>
+          <button class="at-star" data-v="2" onclick="setRating(2)" aria-label="2 stars"><svg viewBox="0 0 24 24"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" stroke-width="1.5" stroke-linejoin="round"/></svg></button>
+          <button class="at-star" data-v="3" onclick="setRating(3)" aria-label="3 stars"><svg viewBox="0 0 24 24"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" stroke-width="1.5" stroke-linejoin="round"/></svg></button>
+          <button class="at-star" data-v="4" onclick="setRating(4)" aria-label="4 stars"><svg viewBox="0 0 24 24"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" stroke-width="1.5" stroke-linejoin="round"/></svg></button>
+          <button class="at-star" data-v="5" onclick="setRating(5)" aria-label="5 stars"><svg viewBox="0 0 24 24"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" stroke-width="1.5" stroke-linejoin="round"/></svg></button>
+        </div>
+        <textarea class="at-pc-textarea" id="at-rating-comment" placeholder="Leave a comment (optional)…"></textarea>
+        <div class="at-pc-actions" style="padding-top:14px;margin-top:14px;border-top:none;gap:8px">
+          <button class="at-pcbtn primary" id="at-rating-btn" onclick="submitRating()" disabled>
+            <svg viewBox="0 0 24 24" fill="none"><path d="M20 6L9 17L4 12" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/></svg>
+            Submit rating
+          </button>
+          <div class="at-rating-ok" id="at-rating-ok">
+            <svg viewBox="0 0 24 24" fill="none"><path d="M20 6L9 17L4 12" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/></svg>
+            Rating submitted — thank you!
+          </div>
+        </div>
+      </div>
+      <div class="at-pc-actions" id="at-pc-actions">
+        <button class="at-pcbtn primary" id="at-btn-rejoin" onclick="rejoinCall()" style="display:none">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M15 10l5-5-5-5M20 5H9a6 6 0 000 12h1" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+          Rejoin
+        </button>
+        <a class="at-pcbtn secondary" id="at-btn-rebook" href="/aira" style="display:none">
+          <svg viewBox="0 0 24 24" fill="none"><rect x="3" y="4" width="18" height="18" rx="2" stroke="currentColor" stroke-width="2"/><path d="M16 2v4M8 2v4M3 10h18" stroke="currentColor" stroke-width="2"/></svg>
+          Book new appointment
+        </a>
+        <a class="at-pcbtn secondary" id="at-btn-record" href="#" style="display:none">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M9 12h6M9 16h6M17 21H7a2 2 0 01-2-2V5a2 2 0 012-2h7l5 5v11a2 2 0 01-2 2z" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+          Patient record
+        </a>
+        <a class="at-pcbtn ghost" id="at-btn-home" href="/patient">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+          Back to dashboard
+        </a>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  <div class="at-footer">Powered by <strong>AirTook™</strong> · Secure telemedicine</div>
+</div>
+
+<!-- Duration timer overlay -->
+<div class="at-timer" id="at-timer">00:00</div>
+
+<script src="https://unpkg.com/@daily-co/daily-js"></script>
+<script>
+(function () {
+  var SESSION_ID   = "{{ session_id }}";
+  var SESS_STATUS  = "{{ session_status or '' }}";
+  var IS_GUEST     = {{ 1 if is_guest else 0 }};
+  var CONSULT_MODE = "{{ consultation_mode or 'Video' }}";
+  var BOOKED_MINS  = {{ duration_minutes or 30 }};
+
+  var urlParams = new URLSearchParams(window.location.search);
+  var joinKey   = urlParams.get("k");
+
+  // DOM refs
+  var statusEl   = document.getElementById("at-status");
+  var callWrap   = document.getElementById("at-call-wrap");
+  var frameEl    = document.getElementById("daily-frame");
+  var infoBar    = document.getElementById("at-info-bar");
+  var timerEl    = document.getElementById("at-timer");
+  var waitingEl  = document.getElementById("at-waiting");
+  var extOverlay = document.getElementById("at-ext-overlay");
+  var postcall   = document.getElementById("at-postcall");
+
+  // State
+  var role         = null;
+  var currentInfo  = null;
+  var callFrame    = null;
+  var selectedStar = 0;
+
+  // Timer state
+  var timerInterval   = null;
+  var timerStartMs    = null;   // wall-clock ms when both joined
+  var durationMs      = BOOKED_MINS * 60 * 1000;
+  var warnFired       = false;
+  var graceFired      = false;
+  var graceInterval   = null;
+  var graceSecsLeft   = 90;
+
+  // Extension fees (will be computed from per-minute rate)
+  var perMinuteRate   = 0;
+  var DISCOUNT        = 0.20;
+
+  // ── API call ($.ajax) ─────────────────────────────────────────────────────
+  function api(method, endpoint, data, cb, errCb) {
+    $.ajax({
+      url: "/api/method/" + endpoint,
+      type: method,
+      data: data || {},
+      headers: { "X-Frappe-CSRF-Token": window.__airtook_csrf || "" },
+      success: function(r) { if (cb) cb(r.message || r); },
+      error: function(xhr) {
+        var msg = "Request failed";
+        try {
+          var parsed = JSON.parse(xhr.responseText || "{}");
+          msg = parsed.exc_type || parsed._server_messages || parsed.message || msg;
+        } catch(e) {}
+        if (errCb) errCb(msg);
+        else console.error(endpoint, msg);
+      }
+    });
   }
 
-  async function start() {
-    if (!SESSION_ID) {
-      setStatus("danger", "Missing session id.");
-      return;
+  // ── Status helper ─────────────────────────────────────────────────────────
+  function setStatus(type, msg, spinner) {
+    if (!statusEl) return;
+    statusEl.style.display = "flex";
+    statusEl.className = "at-status " + type;
+    statusEl.innerHTML = (spinner ? '<div class="spin"></div>' : '') + '<span>' + msg + '</span>';
+  }
+
+  // ── Waiting room ──────────────────────────────────────────────────────────
+  function showWaiting(msg) {
+    if (waitingEl) {
+      waitingEl.classList.add("visible");
+      var msgEl = document.getElementById("at-waiting-msg");
+      if (msgEl) msgEl.textContent = msg || "Waiting for the other party to join…";
     }
+  }
 
-    if (isGuest) {
-      setStatus("warning", "Login required to join this consultation.");
-      return;
-    }
+  function hideWaiting() {
+    if (waitingEl) waitingEl.classList.remove("visible");
+  }
 
-    try {
-      setStatus("info", "Fetching secure join token…");
-      const info = await getJoinInfo();
+  // ── Timer ─────────────────────────────────────────────────────────────────
+  function startSessionTimer(startEpochMs, durationMins) {
+    durationMs  = durationMins * 60 * 1000;
+    timerStartMs = startEpochMs || Date.now();
+    warnFired   = false;
+    graceFired  = false;
+    timerEl.classList.add("visible");
 
-      const roomUrl = info.room_url;
-      const token = info.token;
+    // Pre-compute extension fees
+    perMinuteRate = durationMs > 0 ? (4999 / (durationMins || 30)) : 0;
+    var fee15 = Math.round(15 * perMinuteRate * (1 - DISCOUNT));
+    var fee30 = Math.round(30 * perMinuteRate * (1 - DISCOUNT));
+    var f15El = document.getElementById("at-ext-fee-15");
+    var f30El = document.getElementById("at-ext-fee-30");
+    if (f15El) f15El.textContent = "₦" + fee15.toLocaleString();
+    if (f30El) f30El.textContent = "₦" + fee30.toLocaleString();
 
-      if (!roomUrl || !token) {
-        throw new Error("Missing room_url or token in join info.");
+    timerInterval = setInterval(function() {
+      var elapsed = Date.now() - timerStartMs;
+      var remaining = durationMs - elapsed;
+
+      if (remaining <= 0) {
+        clearInterval(timerInterval);
+        timerEl.textContent = "00:00";
+        timerEl.className = "at-timer visible danger";
+        if (!graceFired) {
+          graceFired = true;
+          startGracePeriod();
+        }
+        return;
       }
 
-      setStatus("info", "Joining call…");
+      var remSecs = Math.ceil(remaining / 1000);
+      var m = Math.floor(remSecs / 60);
+      var s = remSecs % 60;
+      var display = String(m).padStart(2,"0") + ":" + String(s).padStart(2,"0");
+      timerEl.textContent = display;
 
-      const callFrame = window.DailyIframe.createFrame(frameMount, {
-        showLeaveButton: true
-      });
-
-      callWrap.style.display = "block";
-
-      await callFrame.join({
-        url: roomUrl,
-        token: token
-      });
-
-      setStatus("success", "Connected. If you can’t hear/see, allow camera & microphone permissions.");
-    } catch (err) {
-      console.error(err);
-      setStatus("danger", "Unable to join: " + (err && err.message ? err.message : err));
-    }
+      // Warning thresholds
+      if (remSecs <= 180 && !warnFired) {
+        warnFired = true;
+        timerEl.className = "at-timer visible warn";
+        if (role === "patient") {
+          showExtensionOverlay(Math.ceil(remSecs / 60));
+        }
+      } else if (remSecs <= 60) {
+        timerEl.className = "at-timer visible danger";
+      } else if (remSecs <= 180) {
+        timerEl.className = "at-timer visible warn";
+      } else {
+        timerEl.className = "at-timer visible";
+      }
+    }, 500);
   }
 
-  start();
+  function stopTimer() {
+    clearInterval(timerInterval);
+    timerEl.classList.remove("visible");
+    if (!timerStartMs) return "—";
+    var secs = Math.round((Date.now() - timerStartMs) / 1000);
+    var m = Math.floor(secs / 60);
+    var s = secs % 60;
+    return m > 0 ? m + " min " + s + " sec" : s + " sec";
+  }
+
+  function startGracePeriod() {
+    graceSecsLeft = 90;
+    if (extOverlay) extOverlay.classList.remove("visible");
+    setStatus("warn", "Session time elapsed — 90 seconds to wrap up…", false);
+
+    graceInterval = setInterval(function() {
+      graceSecsLeft--;
+      setStatus("warn", "Session ending in " + graceSecsLeft + " seconds…", false);
+      if (graceSecsLeft <= 0) {
+        clearInterval(graceInterval);
+        // Auto-end the session
+        if (callFrame) {
+          try { callFrame.leave(); } catch(e) {}
+        }
+        setStatus("danger", "Session time has ended.", false);
+      }
+    }, 1000);
+  }
+
+  // ── Extension overlay ─────────────────────────────────────────────────────
+  function showExtensionOverlay(minsLeft) {
+    var msgEl = document.getElementById("at-ext-msg");
+    if (msgEl) {
+      msgEl.innerHTML = "You have <strong>" + minsLeft + " minute" + (minsLeft !== 1 ? "s" : "") + "</strong> remaining. Would you like to extend?";
+    }
+    if (extOverlay) extOverlay.classList.add("visible");
+  }
+
+  window.dismissExtension = function() {
+    if (extOverlay) extOverlay.classList.remove("visible");
+  };
+
+  window.requestExtension = function(mins) {
+    var btn15 = document.getElementById("at-ext-15");
+    var btn30 = document.getElementById("at-ext-30");
+    if (btn15) btn15.disabled = true;
+    if (btn30) btn30.disabled = true;
+
+    api("POST", "airtook_video.airtook_video.airtook_video.api.extend_session",
+      { session_id: SESSION_ID, extend_minutes: mins },
+      function(r) {
+        if (r.ok) {
+          // Update duration
+          durationMs += mins * 60 * 1000;
+          clearInterval(graceInterval);
+          graceFired = false;
+          warnFired  = false;
+          if (extOverlay) extOverlay.classList.remove("visible");
+          setStatus("success", "Extended by " + mins + " minutes. ₦" + r.extension_fee.toLocaleString() + " charged.", false);
+          setTimeout(function() { if (statusEl) statusEl.style.display = "none"; }, 3000);
+          if (btn15) btn15.disabled = false;
+          if (btn30) btn30.disabled = false;
+        } else if (r.error === "insufficient_balance") {
+          if (extOverlay) extOverlay.classList.remove("visible");
+          setStatus("danger",
+            "Insufficient wallet balance (need ₦" + r.required.toLocaleString() + ", have ₦" + r.balance.toLocaleString() + "). Session ending…", false);
+          if (btn15) btn15.disabled = false;
+          if (btn30) btn30.disabled = false;
+        } else {
+          setStatus("danger", "Extension failed. Session ending.", false);
+          if (btn15) btn15.disabled = false;
+          if (btn30) btn30.disabled = false;
+        }
+      },
+      function(err) {
+        setStatus("danger", "Extension failed: " + err, false);
+        if (btn15) btn15.disabled = false;
+        if (btn30) btn30.disabled = false;
+      }
+    );
+  };
+
+  // ── Poll for both_joined_at ───────────────────────────────────────────────
+  var pollInterval = null;
+
+  function startPollingForBothJoined() {
+    var attempts = 0;
+    pollInterval = setInterval(function() {
+      attempts++;
+      api("GET", "airtook_video.airtook_video.airtook_video.api.get_session_status",
+        { session_id: SESSION_ID },
+        function(r) {
+          if (r.both_joined_at && r.both_joined_at !== "") {
+            clearInterval(pollInterval);
+            hideWaiting();
+            setStatus("success", "Both parties connected — consultation is live.", false);
+            setTimeout(function() { if (statusEl) statusEl.style.display = "none"; }, 3000);
+            // Start timer from server timestamp
+            var serverStart = new Date(r.both_joined_at).getTime();
+            if (isNaN(serverStart)) serverStart = Date.now();
+            startSessionTimer(serverStart, r.duration_minutes || BOOKED_MINS);
+          }
+          // Stop polling after 15 minutes
+          if (attempts > 180) clearInterval(pollInterval);
+        }
+      );
+    }, 5000);
+  }
+
+  // ── Rating ────────────────────────────────────────────────────────────────
+  window.setRating = function(val) {
+    selectedStar = val;
+    document.querySelectorAll(".at-star svg").forEach(function(svg, i) {
+      svg.classList.toggle("on", i < val);
+    });
+    var btn = document.getElementById("at-rating-btn");
+    if (btn) btn.disabled = false;
+  };
+
+  window.submitRating = function() {
+    var btn = document.getElementById("at-rating-btn");
+    var comment = (document.getElementById("at-rating-comment") || {}).value || "";
+    if (!selectedStar) return;
+    if (btn) { btn.disabled = true; btn.innerHTML = '<div class="spin" style="width:14px;height:14px;border-width:2px"></div> Submitting…'; }
+
+    api("POST", "airtook_video.airtook_video.airtook_video.api.submit_rating",
+      { session_id: SESSION_ID, rating: selectedStar, comment: comment, rated_by_role: role },
+      function() {
+        var sec = document.getElementById("at-rating-sec");
+        if (sec) { sec.style.opacity = ".6"; sec.style.pointerEvents = "none"; }
+        var ok = document.getElementById("at-rating-ok");
+        if (ok) ok.style.display = "flex";
+        if (btn) btn.style.display = "none";
+      },
+      function() {
+        // Show OK even on failure — never block UI
+        var ok = document.getElementById("at-rating-ok");
+        if (ok) ok.style.display = "flex";
+        if (btn) btn.style.display = "none";
+      }
+    );
+  };
+
+  // ── Rejoin ────────────────────────────────────────────────────────────────
+  window.rejoinCall = function() {
+    if (postcall) postcall.style.display = "none";
+    if (infoBar) infoBar.style.display = "flex";
+    setStatus("info", "Reconnecting…", true);
+    startConsultation();
+  };
+
+  // ── Post-call ─────────────────────────────────────────────────────────────
+  function showPostcall(role_, info_, duration_) {
+    if (statusEl)  statusEl.style.display = "none";
+    if (infoBar)   infoBar.style.display  = "none";
+    if (callWrap)  callWrap.style.display  = "none";
+    if (postcall)  postcall.style.display  = "block";
+
+    var durEl = document.getElementById("at-pc-dur");
+    if (durEl) durEl.textContent = duration_ || "—";
+
+    if (role_ === "practitioner") {
+      var t = document.getElementById("at-pc-title"); if (t) t.textContent = "Consultation complete";
+      var s = document.getElementById("at-pc-sub");   if (s) s.textContent = "Session summary for your records";
+      var l = document.getElementById("at-rating-lbl"); if (l) l.textContent = "Notes / patient feedback";
+      var rec = document.getElementById("at-btn-record");
+      if (rec) { rec.style.display = "inline-flex"; rec.href = "/doctor"; }
+      var home = document.getElementById("at-btn-home");
+      if (home) home.href = "/doctor";
+    } else {
+      var rebook = document.getElementById("at-btn-rebook");
+      if (rebook) rebook.style.display = "inline-flex";
+      if (info_ && info_.practitioner) {
+        var pw = document.getElementById("at-pc-prov-wrap");
+        var pn = document.getElementById("at-pc-prov");
+        if (pw) pw.style.display = "flex";
+        if (pn) pn.textContent = info_.display_name || info_.practitioner;
+      }
+    }
+
+    // Check if rejoin is still possible
+    api("GET", "airtook_video.airtook_video.airtook_video.api.get_session_status",
+      { session_id: SESSION_ID },
+      function(r) {
+        if (r.status === "Active") {
+          var rej = document.getElementById("at-btn-rejoin");
+          if (rej) rej.style.display = "inline-flex";
+        }
+      }
+    );
+  }
+
+  // ── Device check ─────────────────────────────────────────────────────────
+  async function checkDevices() {
+    try {
+      var devices = await navigator.mediaDevices.enumerateDevices();
+      var hasMic = devices.some(function(d) { return d.kind === "audioinput"; });
+      if (!hasMic) {
+        setStatus("warn", "Warning: No microphone detected. Please check your device permissions.", false);
+      }
+    } catch(e) {}
+  }
+
+  // ── Join info fetch ───────────────────────────────────────────────────────
+  function getJoinInfo(cb, errCb) {
+    var data = { session_id: SESSION_ID };
+    if (joinKey) data.k = joinKey;
+    api("GET", "airtook_video.airtook_video.airtook_video.api.get_join_info", data, cb, errCb);
+  }
+
+  // ── participant_joined API call ───────────────────────────────────────────
+  function notifyParticipantJoined() {
+    api("POST", "airtook_video.airtook_video.airtook_video.api.participant_joined",
+      { session_id: SESSION_ID },
+      function(r) {
+        if (r.status === "Active" && r.both_joined_at) {
+          clearInterval(pollInterval);
+          hideWaiting();
+          setStatus("success", "Both parties connected — consultation is live.", false);
+          setTimeout(function() { if (statusEl) statusEl.style.display = "none"; }, 3000);
+          var serverStart = new Date(r.both_joined_at).getTime();
+          if (isNaN(serverStart)) serverStart = Date.now();
+          startSessionTimer(serverStart, currentInfo ? currentInfo.duration_minutes : BOOKED_MINS);
+        } else {
+          // Still waiting for other party
+          showWaiting(role === "practitioner"
+            ? "Waiting for the patient to join…"
+            : "Waiting for the doctor to join…");
+          startPollingForBothJoined();
+        }
+      }
+    );
+  }
+
+  // ── Main start ────────────────────────────────────────────────────────────
+  function startConsultation() {
+    if (!SESSION_ID) { setStatus("danger", "Missing session identifier.", false); return; }
+    if (SESS_STATUS === "Ended") return;
+    if (IS_GUEST && !joinKey) { setStatus("warn", "Please log in to join this consultation.", false); return; }
+
+    checkDevices();
+    setStatus("info", "Connecting to secure consultation room…", true);
+
+    getJoinInfo(
+      function(info) {
+        currentInfo = info;
+        role        = info.role;
+
+        if (info.status === "Ended") {
+          setStatus("warn", "This consultation session has already ended.", false);
+          return;
+        }
+
+        if (!info.room_url || !info.token) {
+          setStatus("danger", "Invalid meeting credentials. Please refresh.", false);
+          return;
+        }
+
+        setStatus("info", "Joining consultation…", true);
+
+        // Create Daily frame
+        var frameOpts = {
+          showLeaveButton: true,
+          iframeStyle: { width: "100%", height: "100%", border: "none" }
+        };
+
+        // For audio-only sessions, set the appropriate Daily UI hint
+        if (CONSULT_MODE === "Audio") {
+          frameOpts.defaultVideoOff = true;
+        }
+
+        callFrame = window.DailyIframe.createFrame(frameEl, frameOpts);
+
+        callWrap.style.display = "block";
+
+        callFrame.on("joined-meeting", function() {
+          setStatus("info",
+            role === "practitioner"
+              ? "You're connected. Waiting for patient to join…"
+              : "You're connected. Waiting for doctor to join…",
+            false);
+          // Notify backend — this triggers both-parties detection
+          notifyParticipantJoined();
+        });
+
+        callFrame.on("participant-joined", function(evt) {
+          // A second participant joined — trigger server check
+          if (evt && evt.participant && !evt.participant.local) {
+            notifyParticipantJoined();
+          }
+        });
+
+        callFrame.on("participant-left", function(evt) {
+          if (evt && evt.participant && !evt.participant.local) {
+            api("POST", "airtook_video.airtook_video.airtook_video.api.participant_left",
+              { session_id: SESSION_ID }, null);
+          }
+        });
+
+        callFrame.on("left-meeting", function() {
+          var duration = stopTimer();
+          clearInterval(pollInterval);
+          clearInterval(graceInterval);
+          if (extOverlay) extOverlay.classList.remove("visible");
+
+          if (role === "practitioner") {
+            api("POST", "airtook_video.airtook_video.airtook_video.api.end_session",
+              { session_id: SESSION_ID }, null);
+          }
+
+          showPostcall(role, currentInfo, duration);
+        });
+
+        callFrame.on("error", function(error) {
+          stopTimer();
+          setStatus("danger", "Connection error: " + (error.errorMsg || "Please refresh and try again"), false);
+        });
+
+        // Join the room
+        var joinOpts = {
+          url:      info.room_url,
+          token:    info.token,
+          userName: info.display_name || "AirTook User",
+        };
+
+        // Audio-only: mute video at join time
+        if (CONSULT_MODE === "Audio") {
+          joinOpts.startVideoOff = true;
+        }
+
+        callFrame.join(joinOpts).catch(function(err) {
+          setStatus("danger", err.message || "Unable to join. Please refresh.", false);
+        });
+
+        // Show waiting overlay immediately until both parties connect
+        showWaiting(
+          role === "practitioner"
+            ? "Waiting for the patient to join…"
+            : "Waiting for the doctor to join…"
+        );
+
+        // If both_joined_at is already set (both previously joined, one is rejoining)
+        if (info.both_joined_at && info.both_joined_at !== "") {
+          hideWaiting();
+          var ts = new Date(info.both_joined_at).getTime();
+          if (!isNaN(ts)) startSessionTimer(ts, info.duration_minutes || BOOKED_MINS);
+        }
+      },
+      function(err) {
+        setStatus("danger", err || "Unable to connect. Please refresh.", false);
+      }
+    );
+  }
+
+  // Remove ERPNext chrome
+  window.addEventListener("DOMContentLoaded", function() {
+    ["body > header","body > nav","body > .navbar","body > footer",
+     "body > a[href*='/app']","body > a[href*='/login']"
+    ].forEach(function(sel) {
+      document.querySelectorAll(sel).forEach(function(el) { el.remove(); });
+    });
+  });
+
+  startConsultation();
 })();
 </script>
 {% endblock %}
