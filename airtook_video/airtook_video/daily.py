@@ -13,29 +13,28 @@ def _get_daily_config():
     return api_key, base_url, token_ttl_minutes, room_exp_minutes
 
 
-def daily_create_room(room_name, exp_minutes=None):
+def daily_create_room(room_name, exp_minutes=None, extra_properties=None):
     api_key, base_url, _, default_room_exp = _get_daily_config()
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
+        "Expect": "",
     }
     minutes = exp_minutes if exp_minutes is not None else default_room_exp
-    payload = {
-        "name": room_name,
-        "properties": {
-            "enable_chat": False,
-            "enable_screenshare": True,
-            "start_video_off": False,
-            "start_audio_off": False,
-            # ✅ Fix 1: disable knocking/lobby — participants join directly without waiting to be admitted
-            "enable_knocking": False,
-            "enable_prejoin_ui": False,
-        },
+    props = {
+        "enable_chat":        False,
+        "enable_screenshare": True,
+        "start_video_off":    False,
+        "start_audio_off":    False,
+        "enable_knocking":    False,
+        "enable_prejoin_ui":  False,
     }
+    if extra_properties:
+        props.update(extra_properties)
+    payload = {"name": room_name, "properties": props}
     if minutes and minutes > 0:
         payload["properties"]["exp"] = int(time.time()) + (int(minutes) * 60)
-    # Suppress "Expect: 100-continue" — some proxies reject it with HTTP 417
-    headers["Expect"] = ""
+
     r = requests.post(f"{base_url}/rooms", json=payload, headers=headers, timeout=30)
     if r.status_code == 409:
         r2 = requests.get(f"{base_url}/rooms/{room_name}", headers=headers, timeout=30)
