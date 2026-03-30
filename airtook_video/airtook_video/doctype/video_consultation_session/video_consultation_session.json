@@ -7,7 +7,9 @@
  "engine": "InnoDB",
  "field_order": [
   "section_break_u2jo",
+  "appointment",
   "session_type",
+  "consultation_mode",
   "status",
   "department",
   "practitioner",
@@ -17,7 +19,11 @@
   "patient_join_key",
   "patient_join_key_expires_at",
   "started_at",
+  "both_joined_at",
   "ended_at",
+  "participant_count",
+  "extensions_count",
+  "duration_minutes",
   "patient_user",
   "booked_by",
   "allow_magic_link"
@@ -29,6 +35,12 @@
    "label": "Session"
   },
   {
+   "fieldname": "appointment",
+   "fieldtype": "Link",
+   "label": "Patient Appointment",
+   "options": "Patient Appointment"
+  },
+  {
    "description": "Type of consultation",
    "fieldname": "session_type",
    "fieldtype": "Select",
@@ -36,6 +48,13 @@
    "label": "Session Type",
    "options": "Scheduled\nQuick Consult",
    "reqd": 1
+  },
+  {
+   "fieldname": "consultation_mode",
+   "fieldtype": "Select",
+   "label": "Consultation Mode",
+   "options": "Video\nAudio",
+   "default": "Video"
   },
   {
    "description": "Session lifecycle state",
@@ -101,10 +120,33 @@
    "label": "Started At"
   },
   {
+   "fieldname": "both_joined_at",
+   "fieldtype": "Datetime",
+   "label": "Both Parties Joined At"
+  },
+  {
    "description": "Time the call ended",
    "fieldname": "ended_at",
    "fieldtype": "Datetime",
    "label": "Ended At"
+  },
+  {
+   "fieldname": "participant_count",
+   "fieldtype": "Int",
+   "label": "Current Participant Count",
+   "default": "0"
+  },
+  {
+   "fieldname": "extensions_count",
+   "fieldtype": "Int",
+   "label": "Number of Extensions",
+   "default": "0"
+  },
+  {
+   "fieldname": "duration_minutes",
+   "fieldtype": "Int",
+   "label": "Booked Duration (minutes)",
+   "default": "30"
   },
   {
    "description": "Registered patient account for this consultation. \nEvery session must be tied to a User, even if the patient joins via a magic link.",
@@ -133,10 +175,10 @@
  "index_web_pages_for_search": 1,
  "links": [],
  "modified": "2026-02-09 05:58:22.777427",
- "modified_by": "obxserver@gmail.com",
+ "modified_by": "Administrator",
  "module": "AirTook Video",
  "name": "Video Consultation Session",
- "owner": "obxserver@gmail.com",
+ "owner": "Administrator",
  "permissions": [
   {
    "create": 1,
