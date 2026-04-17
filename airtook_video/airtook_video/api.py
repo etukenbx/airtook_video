@@ -449,30 +449,47 @@ def extend_session(session_id, extend_minutes):
     discount  = round(gross_fee * EXTENSION_DISCOUNT_PCT / 100, 2)
     ext_fee   = round(gross_fee - discount, 2)
 
-    # Check wallet balance
+    # Check wallet balance — stored on Patient.custom_wallet_balance
     patient_name = doc.patient or frappe.db.get_value("Patient", {"user_id": frappe.session.user}, "name")
     if not patient_name:
         frappe.throw("Patient record not found")
 
-    wallet_balance = frappe.db.get_value("AirTook Wallet", {"patient": patient_name}, "balance") or 0
-    if float(wallet_balance) < ext_fee:
+    from frappe.utils import flt
+    wallet_balance = flt(frappe.db.get_value("Patient", patient_name, "custom_wallet_balance") or 0)
+    if wallet_balance < ext_fee:
         return {
             "ok": False,
             "error": "insufficient_balance",
             "required": ext_fee,
-            "balance": float(wallet_balance),
+            "balance": wallet_balance,
         }
 
-    # Deduct from wallet using the existing api_pay pattern
+    # Atomic wallet deduction with row lock
     try:
-        import airtook_core.airtook_core.api_pay as api_pay
-        api_pay.deduct_from_wallet(
-            patient=patient_name,
-            amount=ext_fee,
-            description=f"Session extension {extend_minutes}min (20% off)",
-            reference_doctype="Video Consultation Session",
-            reference_name=session_id,
-        )
+        frappe.db.sql("SELECT name FROM `tabPatient` WHERE name = %s FOR UPDATE", patient_name)
+        current_bal = flt(frappe.db.get_value("Patient", patient_name, "custom_wallet_balance") or 0)
+        if current_bal < ext_fee:
+            return {"ok": False, "error": "insufficient_balance", "required": ext_fee, "balance": current_bal}
+        new_bal = current_bal - ext_fee
+        frappe.db.set_value("Patient", patient_name, "custom_wallet_balance", new_bal, update_modified=False)
+        frappe.db.commit()
+        # Record the transaction
+        try:
+            frappe.get_doc({
+                "doctype": "AirTook Wallet Transaction",
+                "patient": patient_name,
+                "transaction_type": "Deduction",
+                "amount": ext_fee,
+                "balance_before": current_bal,
+                "balance_after": new_bal,
+                "reference_doctype": "Video Consultation Session",
+                "reference_name": session_id,
+                "notes": f"Session extension {extend_minutes}min (20% discount)",
+                "created_by_user": frappe.session.user,
+            }).insert(ignore_permissions=True)
+            frappe.db.commit()
+        except Exception:
+            pass  # transaction log failure is non-fatal
     except Exception as e:
         frappe.log_error(frappe.get_traceback(), "extend_session wallet deduction failed")
         frappe.throw(f"Payment failed: {str(e)}")
