@@ -46,6 +46,31 @@
       return oldFetch(url, opts);
     };
   }
+
+  // frappe.call polyfill — video.html runs outside Frappe desk JS context
+  if (!window.frappe.call) {
+    window.frappe.call = function (opts) {
+      var body = new URLSearchParams();
+      if (opts.args) {
+        Object.keys(opts.args).forEach(function (k) {
+          var v = opts.args[k];
+          body.append(k, v == null ? '' : String(v));
+        });
+      }
+      window.fetch('/api/method/' + opts.method, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'X-Frappe-CSRF-Token': getCSRF()
+        },
+        credentials: 'same-origin',
+        body: body.toString()
+      })
+      .then(function (res) { return res.json(); })
+      .then(function (r) { if (opts.callback) opts.callback(r); })
+      .catch(function (err) { if (opts.error) opts.error(err); });
+    };
+  }
 })();
 </script>
 
