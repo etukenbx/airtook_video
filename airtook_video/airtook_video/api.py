@@ -555,6 +555,63 @@ def end_session(session_id):
             frappe.db.set_value("Patient Appointment", doc.appointment, "status", "Checked Out")
         frappe.db.commit()
 
+        # ── Credit doctor earnings NOW (after successful consultation) ────────
+        # Earnings are held until session ends so cancelled/no-show appointments
+        # do not generate doctor income.
+        if doc.get("practitioner") and doc.get("appointment"):
+            try:
+                from frappe.utils import flt as _flt
+                appt = doc.appointment
+                # Determine fee and doctor percentage from appointment fields
+                paid_amount = _flt(
+                    frappe.db.get_value("Patient Appointment", appt, "paid_amount") or 0
+                )
+                if paid_amount <= 0:
+                    # Try custom_payment_amount fallback
+                    paid_amount = _flt(
+                        frappe.db.get_value("Patient Appointment", appt, "custom_payment_amount") or 0
+                    )
+                if paid_amount > 0:
+                    # Default 80% doctor share; try to get actual pct from AirTook Setting
+                    commission_pct = 20.0
+                    try:
+                        cp = frappe.db.get_value(
+                            "AirTook Setting", "platform_commission_pct", "setting_value"
+                        )
+                        if cp:
+                            commission_pct = _flt(cp)
+                    except Exception:
+                        pass
+                    doctor_pct = 100.0 - commission_pct
+                    doctor_cut = round(paid_amount * doctor_pct / 100, 2)
+
+                    if doctor_cut > 0:
+                        frappe.db.sql(
+                            "SELECT name FROM `tabHealthcare Practitioner` WHERE name = %s FOR UPDATE",
+                            doc.practitioner,
+                        )
+                        current_earn = _flt(
+                            frappe.db.get_value(
+                                "Healthcare Practitioner", doc.practitioner,
+                                "custom_earnings_balance"
+                            ) or 0
+                        )
+                        frappe.db.set_value(
+                            "Healthcare Practitioner", doc.practitioner,
+                            "custom_earnings_balance", current_earn + doctor_cut,
+                            update_modified=False,
+                        )
+                        frappe.db.commit()
+                        frappe.logger().info(
+                            f"end_session: credited ₦{doctor_cut} to {doc.practitioner} "
+                            f"for session {doc.name} (appointment {appt})"
+                        )
+            except Exception:
+                frappe.log_error(
+                    frappe.get_traceback(),
+                    f"end_session: doctor earnings credit failed for {doc.name}",
+                )
+
     return {"session_id": doc.name, "status": "Ended"}
 
 
