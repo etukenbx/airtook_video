@@ -612,6 +612,22 @@ def end_session(session_id):
                     f"end_session: doctor earnings credit failed for {doc.name}",
                 )
 
+        # ── Trigger post-consultation summary email (best-effort, non-blocking) ─
+        if doc.get("appointment"):
+            try:
+                import frappe.utils.background_jobs as _bj
+                _bj.enqueue(
+                    "airtook_core.api_dashboard.generate_consultation_summary",
+                    appointment_name=doc.appointment,
+                    queue="short",
+                    timeout=60,
+                )
+            except Exception:
+                frappe.log_error(
+                    frappe.get_traceback(),
+                    f"end_session: failed to enqueue consultation summary for {doc.name}",
+                )
+
     return {"session_id": doc.name, "status": "Ended"}
 
 
