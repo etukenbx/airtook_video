@@ -39,3 +39,15 @@
 - Never output site_config.json contents
 - Never suggest editing bench or frappe internals
 - Never assume a module exists without checking apps/ first
+
+## Video Session Lifecycle — airtook_video/airtook_video/api.py
+- `end_session(session_id)` — the main session-close function; it:
+  1. Closes the Daily.co room
+  2. Marks the Patient Appointment as completed
+  3. Calls `generate_consultation_summary()` (in airtook_core) to save an AI wrap-up as a Communication
+  4. Credits doctor earnings: appends consultation fee (doctor's cut) to `custom_earnings_balance` on Healthcare Practitioner
+- Earnings credit happens synchronously inside `end_session()`, NOT deferred or async
+
+## Key Doctypes
+- `Video Consultation Session` — custom doctype tracking each call; linked to Patient Appointment
+- Session state: `scheduled` → `active` → `completed` (or `expired`)
