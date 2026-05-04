@@ -895,7 +895,12 @@ body {
         }
       },
       function(err) {
-        setStatus("danger", err || "Unable to connect. Please refresh.", false);
+        var msg = err || "Unable to connect. Please refresh.";
+        if (typeof msg === "string" && msg.toLowerCase().indexOf("10 minutes") !== -1) {
+          setStatus("warn", "You're a bit early! You can join up to 10 minutes before your appointment. Please come back closer to your scheduled time.", false);
+        } else {
+          setStatus("danger", msg, false);
+        }
       }
     );
   }
