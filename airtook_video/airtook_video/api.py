@@ -167,7 +167,16 @@ def create_session(patient_appointment=None, department=None, practitioner=None,
     room_props = {}
     if mode == "Audio":
         room_props["start_video_off"] = True
-    room = daily_create_room(room_name, extra_properties=room_props)
+    try:
+        room = daily_create_room(room_name, extra_properties=room_props)
+    except Exception as e:
+        err = str(e)
+        if "daily_api_key" in err or "Missing" in err:
+            frappe.throw(
+                "Video consultations are temporarily unavailable. Please contact support.",
+                frappe.ValidationError,
+            )
+        raise
 
     daily_room_name = room.get("name") or room_name
     room_url = room.get("url")
@@ -290,7 +299,7 @@ def get_join_info(session_id, k=None):
     now = now_datetime()
     open_from, close_at, kind = _compute_access_window(doc)
     if kind == "scheduled" and open_from and now < open_from:
-        frappe.throw("Please join within 10 minutes of your appointment time.")
+        frappe.throw("You're a bit early! You can join up to 10 minutes before your appointment time.")
     if close_at and now > close_at:
         if doc.status != "Ended":
             doc.status = "Ended"
@@ -552,7 +561,7 @@ def end_session(session_id):
         doc.save(ignore_permissions=True)
         # Update linked appointment
         if doc.get("appointment"):
-            frappe.db.set_value("Patient Appointment", doc.appointment, "status", "Checked Out")
+            frappe.db.set_value("Patient Appointment", doc.appointment, "status", "Closed")
         frappe.db.commit()
 
         # ── Credit doctor earnings NOW (after successful consultation) ────────
