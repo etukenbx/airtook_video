@@ -281,8 +281,6 @@ def get_join_info(session_id, k=None):
                 frappe.throw("Invalid join key")
             if _is_expired(doc.patient_join_key_expires_at):
                 frappe.throw("Join link expired")
-            doc.db_set("patient_join_key", None, update_modified=False)
-            doc.db_set("patient_join_key_expires_at", None, update_modified=False)
             display_name  = _get_user_display_name(doc.patient_user)
             token_user_id = doc.patient_user
         else:
