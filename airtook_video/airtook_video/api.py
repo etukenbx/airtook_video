@@ -551,7 +551,14 @@ def end_session(session_id):
     if not practitioner_user or practitioner_user != frappe.session.user:
         frappe.throw(_("Not permitted"), frappe.PermissionError)
 
-    if doc.status != "Ended":
+    # Row-lock the session before reading status to prevent concurrent end_session calls
+    # from both passing the check and double-crediting doctor earnings.
+    frappe.db.sql(
+        "SELECT name FROM `tabVideo Consultation Session` WHERE name = %s FOR UPDATE",
+        session_id,
+    )
+    # Re-read status from DB after acquiring the lock (doc was read before the lock).
+    if frappe.db.get_value(SESSION_DTYPE, session_id, "status") != "Ended":
         doc.status = "Ended"
         doc.db_set("ended_at", now_datetime(), update_modified=False)
         doc.db_set("status", "Ended", update_modified=False)
