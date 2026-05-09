@@ -369,22 +369,58 @@ def get_join_info(session_id, k=None):
         "extensions_count":   int(getattr(doc, "extensions_count", 0) or 0),
         "status":             doc.status,
         "both_joined_at":     str(doc.get("both_joined_at") or ""),
+        "appointment":        doc.get("appointment") or "",
     }
+
+
+# ─── participant auth helper ─────────────────────────────────────────────────
+
+def _verify_session_participant(doc, k=None):
+    """
+    Verifies the caller is the practitioner, the patient, or a guest with a
+    valid (unexpired) magic-link join key. Raises PermissionError otherwise.
+    """
+    current_user = frappe.session.user
+    is_guest     = current_user == "Guest"
+
+    if not is_guest:
+        practitioner_user = _get_practitioner_user(doc.practitioner) if doc.practitioner else None
+        if current_user == practitioner_user:
+            return
+        if doc.patient_user and doc.patient_user == current_user:
+            return
+        # Allow System Managers (admin monitoring)
+        if "System Manager" in frappe.get_roles(current_user):
+            return
+        frappe.throw(_("Not permitted"), frappe.PermissionError)
+
+    # Guest path — must supply a valid, unexpired join key
+    if not doc.get("allow_magic_link"):
+        frappe.throw(_("Login required"), frappe.PermissionError)
+    if not k or not doc.patient_join_key:
+        frappe.throw(_("Login required"), frappe.PermissionError)
+    if k != doc.patient_join_key:
+        frappe.throw(_("Invalid join key"), frappe.PermissionError)
+    if _is_expired(doc.patient_join_key_expires_at):
+        frappe.throw(_("Join link expired"), frappe.PermissionError)
 
 
 # ─── participant_joined ──────────────────────────────────────────────────────
 
 @frappe.whitelist(allow_guest=True, methods=["POST"])
-def participant_joined(session_id):
+def participant_joined(session_id, k=None):
     """
     Called by the frontend when Daily.co fires 'participant-joined'.
     When participant count reaches 2, marks both_joined_at and status=Active.
     Returns the server timestamp so both clients can sync the timer.
+    Requires caller to be the session practitioner, patient, or a guest with a
+    valid magic-link join key (k).
     """
     if not session_id:
         frappe.throw("Missing session id")
 
     doc = frappe.get_doc(SESSION_DTYPE, session_id, ignore_permissions=True)
+    _verify_session_participant(doc, k)
     count = int(getattr(doc, "participant_count", 0) or 0)
 
     # Count the new participant
@@ -409,11 +445,12 @@ def participant_joined(session_id):
 # ─── participant_left ────────────────────────────────────────────────────────
 
 @frappe.whitelist(allow_guest=True, methods=["POST"])
-def participant_left(session_id):
+def participant_left(session_id, k=None):
     """Called when a participant leaves — decrements count."""
     if not session_id:
         return
     doc = frappe.get_doc(SESSION_DTYPE, session_id, ignore_permissions=True)
+    _verify_session_participant(doc, k)
     count = max(0, int(getattr(doc, "participant_count", 0) or 0) - 1)
     doc.db_set("participant_count", count, update_modified=False)
     frappe.db.commit()

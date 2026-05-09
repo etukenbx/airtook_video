@@ -709,12 +709,14 @@ body {
 
     if (role_ === "practitioner") {
       var t = document.getElementById("at-pc-title"); if (t) t.textContent = "Consultation complete";
-      var s = document.getElementById("at-pc-sub");   if (s) s.textContent = "Session summary for your records";
+      var s = document.getElementById("at-pc-sub");   if (s) s.textContent = "Write encounter notes now — it's a clinical record";
       var l = document.getElementById("at-rating-lbl"); if (l) l.textContent = "Notes / patient feedback";
+      var apptId = (info_ && info_.appointment) ? info_.appointment : "";
+      var doctorBase = apptId ? "/doctor?open_encounter=" + encodeURIComponent(apptId) : "/doctor";
       var rec = document.getElementById("at-btn-record");
-      if (rec) { rec.style.display = "inline-flex"; rec.href = "/doctor"; }
+      if (rec) { rec.style.display = "inline-flex"; rec.href = doctorBase; rec.textContent = "Write encounter notes"; }
       var home = document.getElementById("at-btn-home");
-      if (home) home.href = "/doctor";
+      if (home) home.href = doctorBase;
     } else {
       var rebook = document.getElementById("at-btn-rebook");
       if (rebook) rebook.style.display = "inline-flex";
@@ -758,8 +760,10 @@ body {
 
   // ── participant_joined API call ───────────────────────────────────────────
   function notifyParticipantJoined() {
+    var pjData = { session_id: SESSION_ID };
+    if (joinKey) pjData.k = joinKey;
     api("POST", "airtook_video.airtook_video.airtook_video.api.participant_joined",
-      { session_id: SESSION_ID },
+      pjData,
       function(r) {
         if (r.status === "Active" && r.both_joined_at) {
           clearInterval(pollInterval);
@@ -840,8 +844,10 @@ body {
 
         callFrame.on("participant-left", function(evt) {
           if (evt && evt.participant && !evt.participant.local) {
+            var plData = { session_id: SESSION_ID };
+            if (joinKey) plData.k = joinKey;
             api("POST", "airtook_video.airtook_video.airtook_video.api.participant_left",
-              { session_id: SESSION_ID }, null);
+              plData, null);
           }
         });
 
