@@ -4,12 +4,14 @@ import frappe
 
 
 def _get_daily_config():
-    api_key = frappe.conf.get("daily_api_key")
+    api_key = (frappe.db.get_single_value("AirTook Configuration", "daily_api_key") or "").strip()
+    if not api_key:
+        api_key = (frappe.conf.get("daily_api_key") or "").strip()
     base_url = (frappe.conf.get("daily_api_base_url") or "https://api.daily.co/v1").rstrip("/")
-    token_ttl_minutes = int(frappe.conf.get("daily_token_ttl_minutes") or 60)  # ✅ Fix 2: raised default from 10 → 60
+    token_ttl_minutes = int(frappe.conf.get("daily_token_ttl_minutes") or 60)
     room_exp_minutes = int(frappe.conf.get("daily_room_exp_minutes") or 60)
     if not api_key:
-        frappe.throw("Missing daily_api_key in site config (Frappe Cloud).")
+        frappe.throw("Missing Daily.co API key. Set it in AirTook Configuration or site_config.json.")
     return api_key, base_url, token_ttl_minutes, room_exp_minutes
 
 
