@@ -605,13 +605,25 @@
 
   // ── Timer ──────────────────────────────────────────────────────────────────
   var _callStart = null, _timerInterval = null;
+  var _totalSeconds = DURATION * 60;
 
   function startTimer() {
     _callStart = Date.now();
+    var timerEl = document.getElementById("call-timer");
     _timerInterval = setInterval(function () {
-      var s = Math.floor((Date.now() - _callStart) / 1000);
-      var m = String(Math.floor(s / 60)).padStart(2, "0");
-      document.getElementById("call-timer").textContent = m + ":" + String(s % 60).padStart(2, "0");
+      var elapsed = Math.floor((Date.now() - _callStart) / 1000);
+      var remaining = _totalSeconds - elapsed;
+      if (remaining <= 0) {
+        timerEl.textContent = "00:00";
+        timerEl.style.color = "#FF6B6B";
+        return;
+      }
+      if (remaining <= 120) timerEl.style.color = "#FF6B6B";
+      else if (remaining <= 300) timerEl.style.color = "#f59e0b";
+      else timerEl.style.color = "";
+      var m = String(Math.floor(remaining / 60)).padStart(2, "0");
+      var s = String(remaining % 60).padStart(2, "0");
+      timerEl.textContent = m + ":" + s;
     }, 1000);
   }
 
