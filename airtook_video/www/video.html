@@ -2,1347 +2,889 @@
 {% block title %}{{ page_title or "AirTook™ Video Consultation" }}{% endblock %}
 {% block page_content %}
 
-<script>
-(function () {
-  var token = "{{ csrf_token }}";
-  window.frappe = window.frappe || {};
-  window.frappe.csrf_token = token;
-
-  function getCSRF() {
-    var m = document.querySelector('meta[name="csrf-token"]');
-    return m ? m.content : token;
-  }
-
-  // Fix jQuery / frappe.call (POST to "/")
-  if (window.jQuery) {
-    jQuery.ajaxSetup({
-      beforeSend: function (xhr, settings) {
-        var url = settings.url || "";
-        var sameOrigin = (!url || url.startsWith("/") || url.indexOf("://") === -1);
-        if (sameOrigin && (settings.type || "").toUpperCase() === "POST") {
-          xhr.setRequestHeader("X-Frappe-CSRF-Token", getCSRF());
-        }
-      }
-    });
-  }
-
-  // Fix fetch /api/method/
-  if (window.fetch) {
-    var oldFetch = window.fetch;
-    window.fetch = function (url, opts) {
-      opts = opts || {};
-      var method = (opts.method || "GET").toUpperCase();
-
-      if (method === "POST") {
-        opts.headers = opts.headers || {};
-        if (opts.headers instanceof Headers) {
-          opts.headers.set("X-Frappe-CSRF-Token", getCSRF());
-        } else {
-          opts.headers["X-Frappe-CSRF-Token"] = getCSRF();
-        }
-        opts.credentials = "same-origin";
-      }
-
-      return oldFetch(url, opts);
-    };
-  }
-
-  // frappe.call polyfill — video.html runs outside Frappe desk JS context
-  if (!window.frappe.call) {
-    window.frappe.call = function (opts) {
-      var body = new URLSearchParams();
-      if (opts.args) {
-        Object.keys(opts.args).forEach(function (k) {
-          var v = opts.args[k];
-          body.append(k, v == null ? '' : String(v));
-        });
-      }
-      window.fetch('/api/method/' + opts.method, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-          'X-Frappe-CSRF-Token': getCSRF()
-        },
-        credentials: 'same-origin',
-        body: body.toString()
-      })
-      .then(function (res) { return res.json(); })
-      .then(function (r) { if (opts.callback) opts.callback(r); })
-      .catch(function (err) { if (opts.error) opts.error(err); });
-    };
-  }
-})();
-</script>
-
 <meta name="csrf-token" content="{{ csrf_token }}">
+
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Sora:wght@300;400;600;700&family=DM+Sans:wght@400;500&display=swap');
-  
+
   :root {
     --primary-blue: #0066FF;
     --primary-deep: #004FCE;
-    --accent-cyan: #00D4FF;
-    --surface-white: #FFFFFF;
-    --surface-light: #F8FAFB;
-    --surface-dark: #1C2026;
-    --text-primary: #0D1117;
-    --text-secondary: #57606A;
-    --text-tertiary: #818B98;
-    --border-subtle: #E5E8EB;
-    --border-medium: #D0D7DE;
+    --surface-dark: #0D1117;
+    --surface-panel: #1C2026;
+    --surface-card: #252B33;
+    --text-light: #FFFFFF;
+    --text-dim: rgba(255,255,255,0.65);
+    --text-muted: rgba(255,255,255,0.38);
+    --border-dark: rgba(255,255,255,0.1);
     --success-green: #00C853;
-    --warning-amber: #FF8F00;
     --error-red: #FF3B30;
-    --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.04), 0 1px 2px rgba(0, 0, 0, 0.02);
-    --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.06), 0 2px 6px rgba(0, 0, 0, 0.03);
-    --shadow-lg: 0 12px 28px rgba(0, 0, 0, 0.08), 0 4px 12px rgba(0, 0, 0, 0.04);
-    --shadow-xl: 0 20px 48px rgba(0, 0, 0, 0.12), 0 8px 20px rgba(0, 0, 0, 0.06);
-    --gradient-primary: linear-gradient(135deg, #0066FF 0%, #00D4FF 100%);
-    --gradient-surface: linear-gradient(180deg, #FFFFFF 0%, #F8FAFB 100%);
+    --warning-amber: #FF8F00;
+    --shadow-xl: 0 20px 48px rgba(0,0,0,0.5);
   }
-  
-  * {
-    margin: 0;
-    padding: 0;
-    box-sizing: border-box;
-  }
-  
-  /* Hide specific ERPNext elements - targeted approach */
-  body > header,
-  body > .navbar,
-  body > nav,
-  .navbar-default,
-  .page-head,
-  .page-title:not(.airtook-title),
-  .standard-sidebar,
-  .layout-side-section,
-  .breadcrumb,
-  .web-sidebar,
-  body > footer,
-  body > .footer,
-  .web-footer,
-  #navbar-breadcrumbs {
-    display: none !important;
-  }
-  
-  /* Hide Home and Login links specifically */
-  body > a[href*="/app"],
-  body > a[href*="/login"],
-  body > a[href*="Home"],
-  body > div:not(.airtook-container) > a[href*="/app"],
-  body > div:not(.airtook-container) > a[href*="/login"] {
-    display: none !important;
-  }
-  
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body > header, body > .navbar, body > nav, .navbar-default,
+  .page-head, .standard-sidebar, .layout-side-section,
+  .breadcrumb, .web-sidebar, body > footer, body > .footer,
+  .web-footer, #navbar-breadcrumbs { display: none !important; }
+
   body {
-    font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, system-ui, sans-serif !important;
-    background: var(--surface-light) !important;
-    color: var(--text-primary);
-    line-height: 1.6;
+    font-family: 'DM Sans', -apple-system, sans-serif !important;
+    background: var(--surface-dark) !important;
+    color: var(--text-light);
     -webkit-font-smoothing: antialiased;
-    -moz-osx-font-smoothing: grayscale;
-  }
-  
-  /* Ensure full-width clean layout */
-  .page-container,
-  body > .container:not(.airtook-container) {
-    padding: 0 !important;
-    margin: 0 !important;
-    max-width: 100% !important;
-  }
-  
-  .airtook-container {
-    max-width: 1280px;
-    margin: 0 auto;
-    padding: 48px 24px;
-    min-height: 100vh;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    background: var(--surface-light);
-  }
-  
-  /* Header Section */
-  .airtook-header {
-    text-align: center;
-    margin-bottom: 48px;
-    animation: fadeInDown 0.8s cubic-bezier(0.16, 1, 0.3, 1);
-  }
-  
-  .airtook-logo {
-    display: inline-flex;
-    align-items: center;
-    gap: 12px;
-    margin-bottom: 24px;
-    animation: fadeIn 1s cubic-bezier(0.16, 1, 0.3, 1) 0.2s both;
-  }
-  
-  .airtook-logo-icon {
-    width: 48px;
-    height: 48px;
-    background: var(--gradient-primary);
-    border-radius: 14px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    box-shadow: var(--shadow-md);
-    position: relative;
     overflow: hidden;
+    height: 100vh;
+    width: 100vw;
   }
-  
-  .airtook-logo-icon::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: linear-gradient(135deg, rgba(255,255,255,0.4) 0%, rgba(255,255,255,0) 100%);
+
+  .page-container, body > .container:not(#vc-root) {
+    padding: 0 !important; margin: 0 !important; max-width: 100% !important;
   }
-  
-  .airtook-logo-icon svg {
-    width: 28px;
-    height: 28px;
-    color: white;
-    z-index: 1;
-  }
-  
-  .airtook-logo-text {
-    font-family: 'Sora', sans-serif;
-    font-size: 28px;
-    font-weight: 700;
-    color: var(--text-primary);
-    letter-spacing: -0.02em;
-  }
-  
-  .airtook-logo-tm {
-    font-size: 12px;
-    font-weight: 400;
-    vertical-align: super;
-    color: var(--text-tertiary);
-    margin-left: 2px;
-  }
-  
-  .airtook-title {
-    font-family: 'Sora', sans-serif;
-    font-size: 36px;
-    font-weight: 600;
-    color: var(--text-primary);
-    margin-bottom: 12px;
-    letter-spacing: -0.02em;
-    line-height: 1.2;
-  }
-  
-  .airtook-subtitle {
-    font-size: 17px;
-    color: var(--text-secondary);
-    max-width: 560px;
-    margin: 0 auto;
-    font-weight: 400;
-  }
-  
-  /* Status Alert */
-  .airtook-status {
-    width: 100%;
-    max-width: 880px;
-    padding: 20px 28px;
-    border-radius: 16px;
-    margin-bottom: 32px;
-    display: flex;
-    align-items: center;
-    gap: 16px;
-    font-size: 15px;
-    font-weight: 500;
-    box-shadow: var(--shadow-md);
-    transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
-    animation: slideUp 0.6s cubic-bezier(0.16, 1, 0.3, 1) 0.3s both;
-  }
-  
-  .airtook-status-icon {
-    width: 24px;
-    height: 24px;
-    flex-shrink: 0;
-  }
-  
-  .airtook-status.status-info {
-    background: linear-gradient(135deg, #E3F2FF 0%, #F0F8FF 100%);
-    border: 1.5px solid rgba(0, 102, 255, 0.15);
-    color: #0055CC;
-  }
-  
-  .airtook-status.status-success {
-    background: linear-gradient(135deg, #E8F5E9 0%, #F1F8F4 100%);
-    border: 1.5px solid rgba(0, 200, 83, 0.15);
-    color: #00863D;
-  }
-  
-  .airtook-status.status-warning {
-    background: linear-gradient(135deg, #FFF8E1 0%, #FFFBF0 100%);
-    border: 1.5px solid rgba(255, 143, 0, 0.15);
-    color: #CC7000;
-  }
-  
-  .airtook-status.status-danger {
-    background: linear-gradient(135deg, #FFEBEE 0%, #FFF5F5 100%);
-    border: 1.5px solid rgba(255, 59, 48, 0.15);
-    color: #CC2F26;
-  }
-  
-  /* Loading Spinner */
-  .spinner {
-    width: 20px;
-    height: 20px;
-    border: 2.5px solid currentColor;
-    border-right-color: transparent;
-    border-radius: 50%;
-    animation: spin 0.8s linear infinite;
-    flex-shrink: 0;
-  }
-  
-  @keyframes spin {
-    to { transform: rotate(360deg); }
-  }
-  
-  /* Video Call Container */
-  .airtook-call-wrapper {
-    width: 100%;
-    max-width: 1120px;
-    margin-bottom: 32px;
-    animation: scaleIn 0.8s cubic-bezier(0.16, 1, 0.3, 1) 0.4s both;
-  }
-  
-  .airtook-call-container {
-    background: var(--surface-white);
-    border-radius: 24px;
-    overflow: hidden;
-    box-shadow: var(--shadow-xl);
-    border: 1px solid var(--border-subtle);
-    position: relative;
-  }
-  
-  .airtook-call-container::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    height: 4px;
-    background: var(--gradient-primary);
-    z-index: 10;
-  }
-  
-  #daily-frame {
-    width: 100%;
-    height: 75vh;
-    min-height: 560px;
-    border: none;
-    display: block;
+
+  /* ── Root layout ── */
+  #vc-root {
+    position: fixed; inset: 0;
+    display: flex; flex-direction: column;
     background: var(--surface-dark);
   }
-  
-  /* Session Info */
-  .airtook-session-info {
-    background: var(--surface-white);
-    border: 1px solid var(--border-subtle);
+
+  /* ── Sections that toggle ── */
+  #vc-preload, #vc-call, #vc-postcall, #vc-error { display: none; }
+  #vc-preload.active, #vc-call.active, #vc-postcall.active, #vc-error.active { display: flex; }
+
+  /* ══════════ PRE-LOAD (waiting room) ══════════════════════════════════════ */
+  #vc-preload {
+    flex-direction: column;
+    align-items: center; justify-content: center;
+    min-height: 100vh;
+    gap: 24px;
+    padding: 32px;
+  }
+
+  .preload-logo {
+    display: flex; align-items: center; gap: 12px; margin-bottom: 8px;
+  }
+  .preload-logo-icon {
+    width: 44px; height: 44px;
+    background: linear-gradient(135deg, #0066FF 0%, #00D4FF 100%);
     border-radius: 12px;
-    padding: 16px 20px;
-    max-width: 1120px;
-    width: 100%;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    box-shadow: var(--shadow-sm);
-    animation: fadeIn 0.8s cubic-bezier(0.16, 1, 0.3, 1) 0.6s both;
+    display: flex; align-items: center; justify-content: center;
   }
-  
-  .session-label {
-    font-size: 13px;
-    color: var(--text-tertiary);
-    font-weight: 500;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
+  .preload-logo-icon svg { width: 24px; height: 24px; color: white; }
+  .preload-logo-text {
+    font-family: 'Sora', sans-serif; font-size: 24px; font-weight: 700;
+    color: var(--text-light); letter-spacing: -0.02em;
   }
-  
-  .session-id {
-    font-family: 'Menlo', 'Monaco', 'Courier New', monospace;
-    font-size: 14px;
-    color: var(--text-primary);
-    background: var(--surface-light);
-    padding: 6px 12px;
-    border-radius: 8px;
-    border: 1px solid var(--border-subtle);
-    font-weight: 500;
-  }
-  
-  .session-secure {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 13px;
-    color: var(--success-green);
-    font-weight: 500;
-  }
-  
-  .session-secure svg {
-    width: 16px;
-    height: 16px;
-  }
-  
-  /* Invalid State */
-  .airtook-error-state {
-    text-align: center;
-    padding: 80px 24px;
-    max-width: 560px;
-    margin: 0 auto;
-  }
-  
-  .error-icon {
-    width: 72px;
-    height: 72px;
-    margin: 0 auto 24px;
-    background: linear-gradient(135deg, #FFEBEE 0%, #FFF5F5 100%);
+
+  .preload-card {
+    background: var(--surface-panel);
+    border: 1px solid var(--border-dark);
     border-radius: 20px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: var(--error-red);
-  }
-  
-  .error-icon svg {
-    width: 36px;
-    height: 36px;
-  }
-
-  /* ✅ Improvement A — Session Ended State */
-  .airtook-ended-state {
+    padding: 40px 48px;
+    max-width: 440px; width: 100%;
     text-align: center;
-    padding: 80px 24px;
-    max-width: 560px;
-    margin: 0 auto;
-    animation: fadeIn 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+    box-shadow: var(--shadow-xl);
   }
 
-  .ended-icon {
-    width: 72px;
-    height: 72px;
-    margin: 0 auto 24px;
-    background: linear-gradient(135deg, #F3F4F6 0%, #FAFAFA 100%);
-    border-radius: 20px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: var(--text-tertiary);
+  .preload-spinner {
+    width: 48px; height: 48px;
+    border: 3px solid rgba(255,255,255,0.12);
+    border-top-color: var(--primary-blue);
+    border-radius: 50%;
+    animation: spin 0.9s linear infinite;
+    margin: 0 auto 20px;
   }
 
-  .ended-icon svg {
-    width: 36px;
-    height: 36px;
+  .preload-title {
+    font-family: 'Sora', sans-serif; font-size: 18px; font-weight: 600;
+    color: var(--text-light); margin-bottom: 8px;
+  }
+  .preload-sub { font-size: 14px; color: var(--text-dim); line-height: 1.5; }
+
+  /* Doctor "Start" button */
+  .btn-start {
+    margin-top: 24px;
+    padding: 14px 32px;
+    background: linear-gradient(135deg, #0066FF 0%, #00D4FF 100%);
+    color: white; border: none; border-radius: 12px;
+    font-family: 'DM Sans', sans-serif; font-size: 15px; font-weight: 600;
+    cursor: pointer;
+    box-shadow: 0 4px 16px rgba(0,102,255,0.35);
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+  }
+  .btn-start:hover { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(0,102,255,0.45); }
+  .btn-start:disabled { opacity: 0.55; cursor: not-allowed; transform: none; }
+
+  /* ══════════ IN-CALL ══════════════════════════════════════════════════════ */
+  #vc-call {
+    flex-direction: column;
+    height: 100vh; width: 100vw;
+    position: relative;
+    background: #000;
   }
 
-  .ended-title {
-    font-family: 'Sora', sans-serif;
-    font-size: 24px;
-    font-weight: 600;
-    color: var(--text-primary);
-    margin-bottom: 12px;
+  /* Remote video (full screen) */
+  #remote-video {
+    position: absolute; inset: 0;
+    background: #111;
+    display: flex; align-items: center; justify-content: center;
+  }
+  #remote-video > div { width: 100% !important; height: 100% !important; }
+
+  /* Waiting overlay (patient) */
+  #waiting-overlay {
+    position: absolute; inset: 0; z-index: 10;
+    background: var(--surface-dark);
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 16px;
+  }
+  #waiting-overlay.hidden { display: none; }
+  .waiting-dots span {
+    display: inline-block; width: 8px; height: 8px;
+    background: var(--primary-blue); border-radius: 50%; margin: 0 3px;
+    animation: dot-bounce 1.2s ease-in-out infinite;
+  }
+  .waiting-dots span:nth-child(2) { animation-delay: 0.2s; }
+  .waiting-dots span:nth-child(3) { animation-delay: 0.4s; }
+  @keyframes dot-bounce { 0%,80%,100%{transform:scale(0.7);opacity:0.5} 40%{transform:scale(1);opacity:1} }
+
+  /* Local video (PIP) */
+  #local-video {
+    position: absolute; bottom: 88px; right: 16px; z-index: 20;
+    width: 120px; height: 90px;
+    border-radius: 10px; overflow: hidden;
+    border: 2px solid rgba(255,255,255,0.2);
+    background: #222;
+    cursor: grab;
+  }
+  #local-video:active { cursor: grabbing; }
+  #local-video > div { width: 100% !important; height: 100% !important; }
+
+  /* Timer bar (top) */
+  #call-topbar {
+    position: absolute; top: 0; left: 0; right: 0; z-index: 30;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 20px;
+    background: linear-gradient(180deg, rgba(0,0,0,0.7) 0%, transparent 100%);
+  }
+  #call-timer {
+    font-family: 'DM Sans', sans-serif; font-size: 14px; font-weight: 600;
+    color: var(--text-light);
+    background: rgba(0,0,0,0.45); backdrop-filter: blur(6px);
+    padding: 6px 14px; border-radius: 20px;
+    letter-spacing: 0.04em;
+  }
+  .call-topbar-info {
+    font-size: 13px; color: var(--text-dim);
+    background: rgba(0,0,0,0.35); backdrop-filter: blur(6px);
+    padding: 6px 12px; border-radius: 20px;
   }
 
-  .ended-message {
-    font-size: 16px;
-    color: var(--text-secondary);
-    line-height: 1.6;
+  /* Controls bar (bottom) */
+  #call-controls {
+    position: absolute; bottom: 0; left: 0; right: 0; z-index: 30;
+    display: flex; align-items: center; justify-content: center; gap: 16px;
+    padding: 16px 20px 24px;
+    background: linear-gradient(0deg, rgba(0,0,0,0.75) 0%, transparent 100%);
   }
-  
-  .error-title {
-    font-family: 'Sora', sans-serif;
-    font-size: 24px;
-    font-weight: 600;
-    color: var(--text-primary);
-    margin-bottom: 12px;
+
+  .ctrl-btn {
+    width: 52px; height: 52px;
+    border-radius: 50%; border: none;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer;
+    transition: transform 0.15s ease, background 0.15s ease;
   }
-  
-  .error-message {
-    font-size: 16px;
-    color: var(--text-secondary);
-    line-height: 1.6;
+  .ctrl-btn svg { width: 22px; height: 22px; }
+  .ctrl-btn:hover { transform: scale(1.08); }
+
+  .ctrl-btn.on  { background: rgba(255,255,255,0.18); color: white; }
+  .ctrl-btn.off { background: rgba(255,59,48,0.25); color: var(--error-red); }
+  .ctrl-btn.end { background: var(--error-red); color: white; width: 60px; height: 60px; }
+  .ctrl-btn.end:hover { background: #e0301f; }
+
+  .ctrl-label {
+    font-size: 11px; color: var(--text-dim); margin-top: 4px; text-align: center;
   }
-  
-  /* AirTook Footer */
-  .airtook-footer {
-    text-align: center;
-    padding: 32px 24px;
-    color: var(--text-tertiary);
-    font-size: 13px;
-    animation: fadeIn 0.8s cubic-bezier(0.16, 1, 0.3, 1) 0.8s both;
-  }
-  
-  .airtook-footer-brand {
-    margin-bottom: 8px;
-    font-weight: 500;
-  }
-  
-  .airtook-footer-brand strong {
-    color: var(--text-secondary);
-    font-weight: 600;
-  }
-  
-  /* Animations */
-  @keyframes fadeIn {
-    from {
-      opacity: 0;
-    }
-    to {
-      opacity: 1;
-    }
-  }
-  
-  @keyframes fadeInDown {
-    from {
-      opacity: 0;
-      transform: translateY(-20px);
-    }
-    to {
-      opacity: 1;
-      transform: translateY(0);
-    }
-  }
-  
-  @keyframes slideUp {
-    from {
-      opacity: 0;
-      transform: translateY(30px);
-    }
-    to {
-      opacity: 1;
-      transform: translateY(0);
-    }
-  }
-  
-  @keyframes scaleIn {
-    from {
-      opacity: 0;
-      transform: scale(0.95);
-    }
-    to {
-      opacity: 1;
-      transform: scale(1);
-    }
-  }
-  
-  /* Responsive Design */
-  /* ✅ Post-call panel */
-  .airtook-postcall {
+  .ctrl-group { display: flex; flex-direction: column; align-items: center; }
+
+  /* ── End confirm overlay ── */
+  #end-confirm {
     display: none;
-    width: 100%;
-    max-width: 880px;
-    animation: slideUp 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+    position: absolute; inset: 0; z-index: 50;
+    background: rgba(0,0,0,0.75); backdrop-filter: blur(4px);
+    align-items: center; justify-content: center;
+  }
+  #end-confirm.active { display: flex; }
+  .end-confirm-card {
+    background: var(--surface-panel); border: 1px solid var(--border-dark);
+    border-radius: 20px; padding: 32px; max-width: 360px; width: 90%;
+    text-align: center; box-shadow: var(--shadow-xl);
+  }
+  .end-confirm-card h3 {
+    font-family: 'Sora', sans-serif; font-size: 18px; font-weight: 600;
+    color: var(--text-light); margin-bottom: 10px;
+  }
+  .end-confirm-card p { font-size: 14px; color: var(--text-dim); margin-bottom: 24px; line-height: 1.5; }
+  .end-confirm-btns { display: flex; gap: 12px; justify-content: center; }
+  .btn-confirm-cancel {
+    padding: 11px 24px; border-radius: 10px;
+    background: rgba(255,255,255,0.1); color: var(--text-light);
+    border: 1px solid var(--border-dark); font-size: 14px; font-weight: 600;
+    cursor: pointer; transition: background 0.15s;
+  }
+  .btn-confirm-cancel:hover { background: rgba(255,255,255,0.16); }
+  .btn-confirm-end {
+    padding: 11px 24px; border-radius: 10px;
+    background: var(--error-red); color: white;
+    border: none; font-size: 14px; font-weight: 600;
+    cursor: pointer; transition: background 0.15s;
+  }
+  .btn-confirm-end:hover { background: #e0301f; }
+
+  /* ══════════ POST-CALL ════════════════════════════════════════════════════ */
+  #vc-postcall {
+    flex-direction: column; align-items: center; justify-content: center;
+    min-height: 100vh; padding: 32px;
+    background: #F8FAFB; gap: 0;
+    overflow-y: auto;
   }
 
   .postcall-card {
-    background: var(--surface-white);
-    border: 1px solid var(--border-subtle);
-    border-radius: 24px;
-    padding: 40px;
-    box-shadow: var(--shadow-lg);
-    margin-bottom: 16px;
+    background: white; border: 1px solid #E5E8EB;
+    border-radius: 24px; padding: 40px;
+    max-width: 560px; width: 100%;
+    box-shadow: 0 12px 28px rgba(0,0,0,0.07);
+    color: #0D1117;
   }
 
-  .postcall-header {
-    display: flex;
-    align-items: center;
-    gap: 16px;
-    margin-bottom: 32px;
-    padding-bottom: 24px;
-    border-bottom: 1px solid var(--border-subtle);
-  }
-
+  .postcall-header { display: flex; align-items: center; gap: 16px; margin-bottom: 28px; }
   .postcall-icon {
-    width: 52px;
-    height: 52px;
-    border-radius: 16px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
+    width: 52px; height: 52px; border-radius: 16px;
+    background: #F3F4F6; display: flex; align-items: center; justify-content: center;
+    color: #57606A; flex-shrink: 0;
   }
-
-  .postcall-icon.ended {
-    background: linear-gradient(135deg, #F3F4F6 0%, #E9ECEF 100%);
-    color: var(--text-tertiary);
-  }
-
   .postcall-icon svg { width: 26px; height: 26px; }
-
   .postcall-header-text h3 {
-    font-family: 'Sora', sans-serif;
-    font-size: 20px;
-    font-weight: 600;
-    color: var(--text-primary);
-    margin-bottom: 4px;
+    font-family: 'Sora', sans-serif; font-size: 20px; font-weight: 600; margin-bottom: 4px;
   }
+  .postcall-header-text p { font-size: 14px; color: #57606A; }
 
-  .postcall-header-text p {
-    font-size: 14px;
-    color: var(--text-secondary);
-  }
-
-  .postcall-meta {
-    display: flex;
-    gap: 24px;
-    margin-bottom: 32px;
-    flex-wrap: wrap;
-  }
-
-  .postcall-meta-item {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-  }
-
+  .postcall-meta { display: flex; gap: 24px; flex-wrap: wrap; margin-bottom: 28px; }
+  .postcall-meta-item { display: flex; flex-direction: column; gap: 3px; }
   .postcall-meta-label {
-    font-size: 11px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    color: var(--text-tertiary);
+    font-size: 11px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.06em; color: #818B98;
   }
+  .postcall-meta-value { font-size: 15px; font-weight: 600; color: #0D1117; }
 
-  .postcall-meta-value {
-    font-size: 16px;
-    font-weight: 600;
-    color: var(--text-primary);
+  .rating-section { margin-bottom: 24px; }
+  .rating-section h4 {
+    font-family: 'Sora', sans-serif; font-size: 15px; font-weight: 600; margin-bottom: 12px;
   }
-
-  /* Rating */
-  .postcall-rating-section {
-    margin-bottom: 28px;
-  }
-
-  .postcall-rating-section h4 {
-    font-family: 'Sora', sans-serif;
-    font-size: 15px;
-    font-weight: 600;
-    color: var(--text-primary);
-    margin-bottom: 12px;
-  }
-
-  .star-row {
-    display: flex;
-    gap: 8px;
-    margin-bottom: 16px;
-  }
-
-  .star-btn {
-    background: none;
-    border: none;
-    cursor: pointer;
-    padding: 4px;
-    transition: transform 0.15s ease;
-    line-height: 1;
-  }
-
+  .star-row { display: flex; gap: 8px; margin-bottom: 14px; }
+  .star-btn { background: none; border: none; cursor: pointer; padding: 4px; transition: transform 0.15s; }
   .star-btn:hover { transform: scale(1.2); }
-
-  .star-btn svg {
-    width: 32px;
-    height: 32px;
-    transition: fill 0.15s ease, stroke 0.15s ease;
-  }
-
-  .star-btn svg.empty { fill: none; stroke: var(--border-medium); }
-  .star-btn svg.filled { fill: #FFB800; stroke: #FFB800; }
+  .star-btn svg { width: 30px; height: 30px; transition: fill 0.15s, stroke 0.15s; }
 
   .postcall-textarea {
-    width: 100%;
-    padding: 14px 16px;
-    border: 1.5px solid var(--border-medium);
-    border-radius: 12px;
-    font-family: 'DM Sans', sans-serif;
-    font-size: 14px;
-    color: var(--text-primary);
-    background: var(--surface-light);
-    resize: vertical;
-    min-height: 88px;
-    outline: none;
-    transition: border-color 0.2s ease;
+    width: 100%; padding: 12px 14px;
+    border: 1.5px solid #D0D7DE; border-radius: 10px;
+    font-family: 'DM Sans', sans-serif; font-size: 14px; color: #0D1117;
+    background: #F8FAFB; resize: vertical; min-height: 80px; outline: none;
+    transition: border-color 0.2s;
   }
+  .postcall-textarea:focus { border-color: var(--primary-blue); background: white; }
+  .postcall-textarea::placeholder { color: #818B98; }
 
-  .postcall-textarea:focus {
-    border-color: var(--primary-blue);
-    background: var(--surface-white);
-  }
-
-  .postcall-textarea::placeholder { color: var(--text-tertiary); }
-
-  /* Action buttons */
   .postcall-actions {
-    display: flex;
-    gap: 12px;
-    flex-wrap: wrap;
-    margin-top: 28px;
-    padding-top: 24px;
-    border-top: 1px solid var(--border-subtle);
+    display: flex; gap: 10px; flex-wrap: wrap;
+    margin-top: 24px; padding-top: 20px; border-top: 1px solid #E5E8EB;
   }
 
-  .btn-postcall {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    padding: 12px 22px;
-    border-radius: 12px;
-    font-family: 'DM Sans', sans-serif;
-    font-size: 14px;
-    font-weight: 600;
-    cursor: pointer;
-    border: none;
-    transition: all 0.2s ease;
-    text-decoration: none;
+  .btn-pc {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 11px 20px; border-radius: 10px;
+    font-family: 'DM Sans', sans-serif; font-size: 14px; font-weight: 600;
+    cursor: pointer; border: none; text-decoration: none;
+    transition: all 0.18s ease;
   }
-
-  .btn-postcall svg { width: 18px; height: 18px; flex-shrink: 0; }
-
-  .btn-postcall.primary {
-    background: var(--gradient-primary);
-    color: white;
-    box-shadow: 0 4px 12px rgba(0, 102, 255, 0.25);
+  .btn-pc svg { width: 16px; height: 16px; flex-shrink: 0; }
+  .btn-pc.primary {
+    background: linear-gradient(135deg, #0066FF 0%, #00D4FF 100%);
+    color: white; box-shadow: 0 4px 12px rgba(0,102,255,0.22);
   }
-
-  .btn-postcall.primary:hover {
-    transform: translateY(-1px);
-    box-shadow: 0 6px 16px rgba(0, 102, 255, 0.35);
+  .btn-pc.primary:hover { transform: translateY(-1px); box-shadow: 0 6px 16px rgba(0,102,255,0.32); }
+  .btn-pc.secondary {
+    background: white; color: var(--primary-blue);
+    border: 1.5px solid rgba(0,102,255,0.25);
   }
-
-  .btn-postcall.secondary {
-    background: var(--surface-white);
-    color: var(--primary-blue);
-    border: 1.5px solid rgba(0, 102, 255, 0.25);
+  .btn-pc.secondary:hover { background: #EEF4FF; }
+  .btn-pc.ghost {
+    background: #F3F4F6; color: #57606A;
+    border: 1.5px solid #E5E8EB;
   }
+  .btn-pc.ghost:hover { background: #E5E8EB; color: #0D1117; }
+  .btn-pc:disabled { opacity: 0.5; cursor: not-allowed; transform: none !important; }
 
-  .btn-postcall.secondary:hover {
-    background: #EEF4FF;
-    border-color: var(--primary-blue);
-  }
-
-  .btn-postcall.ghost {
-    background: var(--surface-light);
-    color: var(--text-secondary);
-    border: 1.5px solid var(--border-subtle);
-  }
-
-  .btn-postcall.ghost:hover {
-    background: var(--border-subtle);
-    color: var(--text-primary);
-  }
-
-  .btn-postcall.danger-ghost {
-    background: var(--surface-white);
-    color: #CC2F26;
-    border: 1.5px solid rgba(255, 59, 48, 0.2);
-  }
-
-  .btn-postcall.danger-ghost:hover {
-    background: #FFF5F5;
-    border-color: var(--error-red);
-  }
-
-  .btn-postcall:disabled {
-    opacity: 0.55;
-    cursor: not-allowed;
-    transform: none !important;
-  }
-
-  /* Rating submitted confirmation */
   .rating-submitted {
-    display: none;
-    align-items: center;
-    gap: 8px;
-    font-size: 14px;
-    font-weight: 500;
-    color: var(--success-green);
-    padding: 10px 0;
+    display: none; align-items: center; gap: 8px;
+    font-size: 14px; font-weight: 500; color: var(--success-green);
   }
+  .rating-submitted svg { width: 16px; height: 16px; }
 
-  .rating-submitted svg { width: 18px; height: 18px; }
-
-  /* In-call timer */
-  .call-timer {
-    display: none;
-    position: fixed;
-    top: 20px;
-    right: 24px;
-    background: rgba(28, 32, 38, 0.85);
-    color: white;
-    padding: 8px 16px;
-    border-radius: 24px;
-    font-family: 'Menlo', 'Monaco', monospace;
-    font-size: 14px;
-    font-weight: 500;
-    backdrop-filter: blur(8px);
-    z-index: 9999;
-    box-shadow: var(--shadow-md);
-    letter-spacing: 0.04em;
+  /* ══════════ ERROR STATE ══════════════════════════════════════════════════ */
+  #vc-error {
+    flex-direction: column; align-items: center; justify-content: center;
+    min-height: 100vh; padding: 32px;
+    background: var(--surface-dark);
+    text-align: center; gap: 16px;
   }
+  .error-icon-wrap {
+    width: 72px; height: 72px; margin: 0 auto 8px;
+    background: rgba(255,59,48,0.15); border-radius: 20px;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--error-red);
+  }
+  .error-icon-wrap svg { width: 36px; height: 36px; }
+  .error-title { font-family: 'Sora', sans-serif; font-size: 22px; font-weight: 600; color: var(--text-light); }
+  .error-msg { font-size: 15px; color: var(--text-dim); max-width: 440px; line-height: 1.6; }
 
-  .call-timer.visible { display: block; }
+  /* ── Animations ── */
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 
-  @media (max-width: 768px) {
+  @media (max-width: 600px) {
     .postcall-card { padding: 24px 20px; }
     .postcall-actions { flex-direction: column; }
-    .btn-postcall { width: 100%; justify-content: center; }
-    .postcall-meta { gap: 16px; }
-  }
-    
-    .airtook-header {
-      margin-bottom: 32px;
-    }
-    
-    .airtook-logo-icon {
-      width: 40px;
-      height: 40px;
-    }
-    
-    .airtook-logo-icon svg {
-      width: 24px;
-      height: 24px;
-    }
-    
-    .airtook-logo-text {
-      font-size: 24px;
-    }
-    
-    .airtook-title {
-      font-size: 28px;
-    }
-    
-    .airtook-subtitle {
-      font-size: 16px;
-    }
-    
-    .airtook-status {
-      padding: 16px 20px;
-      font-size: 14px;
-    }
-    
-    .airtook-call-container {
-      border-radius: 20px;
-    }
-    
-    #daily-frame {
-      height: 60vh;
-      min-height: 420px;
-    }
-    
-    .airtook-session-info {
-      flex-direction: column;
-      gap: 12px;
-      align-items: flex-start;
-      padding: 16px;
-    }
-    
-    .session-id {
-      font-size: 12px;
-      word-break: break-all;
-    }
-  }
-  
-  @media (max-width: 480px) {
-    .airtook-title {
-      font-size: 24px;
-    }
-    
-    .airtook-subtitle {
-      font-size: 15px;
-    }
-    
-    #daily-frame {
-      min-height: 380px;
-    }
+    .btn-pc { width: 100%; justify-content: center; }
+    #local-video { width: 90px; height: 68px; }
   }
 </style>
 
-<div class="airtook-container">
-  <!-- Header -->
-  <div class="airtook-header">
-    <div class="airtook-logo">
-      <div class="airtook-logo-icon">
-        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <path d="M12 2L2 7L12 12L22 7L12 2Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="white" fill-opacity="0.2"/>
-          <path d="M2 17L12 22L22 17" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-          <path d="M2 12L12 17L22 12" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-        </svg>
-      </div>
-      <div>
-        <span class="airtook-logo-text">AirTook<span class="airtook-logo-tm">™</span></span>
-      </div>
+{% if invalid %}
+<!-- Static error — no session_id in URL -->
+<div id="vc-root">
+  <div id="vc-error" class="active">
+    <div class="error-icon-wrap">
+      <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2"/><path d="M12 8V12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="16" r="1" fill="currentColor"/></svg>
     </div>
-    <h1 class="airtook-title">Video Consultation</h1>
-    <p class="airtook-subtitle">Connect with your healthcare provider in a secure, private consultation</p>
-  </div>
-
-  {% if invalid %}
-    <!-- Error State -->
-    <div class="airtook-error-state">
-      <div class="error-icon">
-        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2"/>
-          <path d="M12 8V12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-          <circle cx="12" cy="16" r="1" fill="currentColor"/>
-        </svg>
-      </div>
-      <h2 class="error-title">Invalid Session</h2>
-      <p class="error-message">
-        The consultation link appears to be invalid or has expired. 
-        Please check your message for the correct link or contact support for assistance.
-      </p>
-    </div>
-
-  {% elif session_status == "Ended" %}
-    <!-- ✅ Improvement A — Session Already Ended State -->
-    <div class="airtook-ended-state">
-      <div class="ended-icon">
-        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2"/>
-          <path d="M9 9L15 15M15 9L9 15" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-        </svg>
-      </div>
-      <h2 class="ended-title">Consultation Has Ended</h2>
-      <p class="ended-message">
-        This consultation session has already ended. 
-        If you need to speak with a provider, please book a new appointment.
-      </p>
-    </div>
-
-  {% else %}
-    <!-- Status Alert -->
-    <div id="status" class="airtook-status status-info">
-      <div class="spinner"></div>
-      <span>Preparing your secure consultation...</span>
-    </div>
-
-    <!-- Video Call -->
-    <div id="call-wrap" class="airtook-call-wrapper" style="display:none;">
-      <div class="airtook-call-container">
-        <div id="daily-frame"></div>
-      </div>
-    </div>
-
-    <!-- Session Info -->
-    <div class="airtook-session-info">
-      <div style="display: flex; align-items: center; gap: 12px;">
-        <span class="session-label">Session ID</span>
-        <span class="session-id">{{ session_id }}</span>
-      </div>
-      <div class="session-secure">
-        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <rect x="5" y="11" width="14" height="10" rx="2" stroke="currentColor" stroke-width="2"/>
-          <path d="M8 11V7C8 4.79086 9.79086 3 12 3V3C14.2091 3 16 4.79086 16 7V11" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-        </svg>
-        <span>End-to-end encrypted</span>
-      </div>
-    </div>
-
-    <!-- ✅ Post-call panel (hidden until user leaves) -->
-    <div id="postcall-panel" class="airtook-postcall">
-      <div class="postcall-card">
-
-        <div class="postcall-header">
-          <div class="postcall-icon ended">
-            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M16 8l-8 8M8 8l8 8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-              <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2"/>
-            </svg>
-          </div>
-          <div class="postcall-header-text">
-            <h3 id="postcall-title">Consultation ended</h3>
-            <p id="postcall-subtitle">Thank you for using AirTook™</p>
-          </div>
-        </div>
-
-        <!-- Session summary -->
-        <div class="postcall-meta">
-          <div class="postcall-meta-item">
-            <span class="postcall-meta-label">Duration</span>
-            <span class="postcall-meta-value" id="postcall-duration">—</span>
-          </div>
-          <div class="postcall-meta-item">
-            <span class="postcall-meta-label">Session ID</span>
-            <span class="postcall-meta-value" style="font-family: monospace; font-size: 13px;">{{ session_id }}</span>
-          </div>
-          <div class="postcall-meta-item" id="postcall-provider-meta" style="display:none;">
-            <span class="postcall-meta-label">Provider</span>
-            <span class="postcall-meta-value" id="postcall-provider-name">—</span>
-          </div>
-        </div>
-
-        <!-- Rating section -->
-        <div class="postcall-rating-section" id="rating-section">
-          <h4 id="rating-label">How was your consultation?</h4>
-          <div class="star-row" id="star-row">
-            <button class="star-btn" data-value="1" onclick="setRating(1)" aria-label="1 star">
-              <svg class="empty" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" stroke-width="1.5" stroke-linejoin="round"/></svg>
-            </button>
-            <button class="star-btn" data-value="2" onclick="setRating(2)" aria-label="2 stars">
-              <svg class="empty" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" stroke-width="1.5" stroke-linejoin="round"/></svg>
-            </button>
-            <button class="star-btn" data-value="3" onclick="setRating(3)" aria-label="3 stars">
-              <svg class="empty" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" stroke-width="1.5" stroke-linejoin="round"/></svg>
-            </button>
-            <button class="star-btn" data-value="4" onclick="setRating(4)" aria-label="4 stars">
-              <svg class="empty" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" stroke-width="1.5" stroke-linejoin="round"/></svg>
-            </button>
-            <button class="star-btn" data-value="5" onclick="setRating(5)" aria-label="5 stars">
-              <svg class="empty" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" stroke-width="1.5" stroke-linejoin="round"/></svg>
-            </button>
-          </div>
-          <textarea class="postcall-textarea" id="rating-comment" placeholder="Leave a comment (optional)…" rows="3"></textarea>
-          <div class="postcall-actions" style="padding-top: 16px; margin-top: 16px; border-top: none; gap: 10px;">
-            <button class="btn-postcall primary" id="submit-rating-btn" onclick="submitRating()" disabled>
-              <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M20 6L9 17L4 12" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-              Submit Rating
-            </button>
-            <div class="rating-submitted" id="rating-submitted">
-              <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M20 6L9 17L4 12" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-              Rating submitted — thank you!
-            </div>
-          </div>
-        </div>
-
-        <!-- Main action buttons -->
-        <div class="postcall-actions" id="postcall-actions">
-          <!-- Rejoin — shown only while session is still Active -->
-          <button class="btn-postcall primary" id="btn-rejoin" onclick="rejoinCall()" style="display:none;">
-            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M15 10l5-5-5-5M20 5H9a6 6 0 000 12h1" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            Rejoin Consultation
-          </button>
-          <!-- Patient only -->
-          <a class="btn-postcall secondary" id="btn-rebook" href="/aira" style="display:none;">
-            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="3" y="4" width="18" height="18" rx="2" stroke="currentColor" stroke-width="2"/><path d="M16 2v4M8 2v4M3 10h18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-            Book New Appointment
-          </a>
-          <!-- Practitioner only -->
-          <a class="btn-postcall secondary" id="btn-patient-record" href="#" style="display:none;">
-            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M9 12h6M9 16h6M17 21H7a2 2 0 01-2-2V5a2 2 0 012-2h7l5 5v11a2 2 0 01-2 2z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            View Patient Record
-          </a>
-          <!-- Both -->
-          <a class="btn-postcall ghost" id="btn-return-home" href="/">
-            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            Return to Dashboard
-          </a>
-        </div>
-
-      </div>
-    </div>
-
-  {% endif %}
-  
-  <!-- AirTook Footer -->
-  <div class="airtook-footer">
-    <div class="airtook-footer-brand">Powered by <strong>AirTook™</strong></div>
-    <div>Secure healthcare consultations</div>
+    <div class="error-title">Invalid Session</div>
+    <div class="error-msg">The consultation link is invalid or expired. Please check your message for the correct link.</div>
   </div>
 </div>
+{% else %}
 
-<!-- In-call duration timer (fixed overlay) -->
-<div class="call-timer" id="call-timer">00:00</div>
+<div id="vc-root">
 
-<!-- Daily iframe SDK -->
-<script src="https://unpkg.com/@daily-co/daily-js"></script>
+  <!-- Pre-load / waiting room -->
+  <div id="vc-preload" class="active">
+    <div class="preload-logo">
+      <div class="preload-logo-icon">
+        <svg viewBox="0 0 24 24" fill="none"><path d="M12 2L2 7L12 12L22 7L12 2Z" stroke="white" stroke-width="2" fill="rgba(255,255,255,0.2)" stroke-linejoin="round"/><path d="M2 17L12 22L22 17" stroke="white" stroke-width="2" stroke-linecap="round"/><path d="M2 12L12 17L22 12" stroke="white" stroke-width="2" stroke-linecap="round"/></svg>
+      </div>
+      <span class="preload-logo-text">AirTook<sup style="font-size:11px;font-weight:400;opacity:.7">™</sup></span>
+    </div>
+
+    <div class="preload-card" id="preload-card">
+      <div class="preload-spinner" id="preload-spinner"></div>
+      <div class="preload-title" id="preload-title">Preparing your consultation…</div>
+      <div class="preload-sub" id="preload-sub">Connecting to the secure room</div>
+      <!-- Doctor-only: shown after device check, hidden for patient -->
+      <button class="btn-start" id="btn-start-consult" style="display:none;" onclick="startConsultation()">
+        <svg viewBox="0 0 24 24" fill="none" style="width:18px;height:18px;display:inline;margin-right:8px;"><path d="M5 3l14 9-14 9V3z" fill="currentColor"/></svg>
+        Start Consultation
+      </button>
+    </div>
+  </div>
+
+  <!-- In-call -->
+  <div id="vc-call">
+
+    <!-- Top bar -->
+    <div id="call-topbar">
+      <div id="call-timer">00:00</div>
+      <div class="call-topbar-info" id="call-session-label">Session {{ session_id }}</div>
+    </div>
+
+    <!-- Remote video (full screen) -->
+    <div id="remote-video"></div>
+
+    <!-- Waiting overlay (patient side — until doctor publishes) -->
+    <div id="waiting-overlay">
+      <div style="font-family:'Sora',sans-serif;font-size:18px;font-weight:600;color:white;">Waiting for your doctor…</div>
+      <div class="waiting-dots">
+        <span></span><span></span><span></span>
+      </div>
+      <div style="font-size:14px;color:rgba(255,255,255,0.55);">The consultation will start when your doctor joins</div>
+    </div>
+
+    <!-- Local video PIP -->
+    <div id="local-video"></div>
+
+    <!-- Controls -->
+    <div id="call-controls">
+      <div class="ctrl-group">
+        <button class="ctrl-btn on" id="btn-mic" onclick="toggleMic()" title="Toggle microphone">
+          <svg id="icon-mic-on" viewBox="0 0 24 24" fill="none"><rect x="9" y="2" width="6" height="12" rx="3" stroke="currentColor" stroke-width="2"/><path d="M5 10a7 7 0 0014 0M12 21v-4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+          <svg id="icon-mic-off" viewBox="0 0 24 24" fill="none" style="display:none;"><path d="M2 2l20 20M9 9v3a3 3 0 005.12 2.12M15 9.34V4a3 3 0 00-5.94-.6M5 10a7 7 0 0012.94 2.94M12 21v-4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        </button>
+        <span class="ctrl-label" id="lbl-mic">Mute</span>
+      </div>
+
+      <div class="ctrl-group">
+        <button class="ctrl-btn on" id="btn-cam" onclick="toggleCam()" title="Toggle camera">
+          <svg id="icon-cam-on" viewBox="0 0 24 24" fill="none"><rect x="2" y="7" width="15" height="12" rx="2" stroke="currentColor" stroke-width="2"/><path d="M17 10l5-3v10l-5-3V10z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+          <svg id="icon-cam-off" viewBox="0 0 24 24" fill="none" style="display:none;"><path d="M2 2l20 20M10.34 6H17a2 2 0 012 2v8.34M17 10l5-3v10l-5-3M2 7h1.34M2 7v12a2 2 0 002 2h10.34" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        </button>
+        <span class="ctrl-label" id="lbl-cam">Stop Video</span>
+      </div>
+
+      <div class="ctrl-group">
+        <button class="ctrl-btn end" id="btn-end" onclick="confirmEnd()" title="End call">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M21.32 8.69C19.35 6.65 16.79 5.5 14.09 5.5c-2.7 0-5.26 1.15-7.23 3.19L3.5 12l2.66 2.66A9.93 9.93 0 009.4 13.1l1.77-1.77c.4-.4 1.05-.4 1.46 0l4.04 4.04c.4.4.4 1.05 0 1.46l-1.77 1.77c.48.64 1.02 1.24 1.61 1.76L19.17 18l2.66-2.66c.39-.39.39-1.02 0-1.41l-.51-.51" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        </button>
+        <span class="ctrl-label">End</span>
+      </div>
+    </div>
+
+    <!-- End-call confirmation -->
+    <div id="end-confirm">
+      <div class="end-confirm-card">
+        <h3 id="confirm-title">End consultation?</h3>
+        <p id="confirm-body">Are you sure you want to end this consultation? This cannot be undone.</p>
+        <div class="end-confirm-btns">
+          <button class="btn-confirm-cancel" onclick="cancelEnd()">Stay in call</button>
+          <button class="btn-confirm-end" id="btn-confirm-end-yes" onclick="executeEnd()">End consultation</button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Post-call panel -->
+  <div id="vc-postcall">
+    <div class="postcall-card">
+
+      <div class="postcall-header">
+        <div class="postcall-icon">
+          <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2"/><path d="M9 9l6 6M15 9l-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        </div>
+        <div class="postcall-header-text">
+          <h3 id="postcall-title">Consultation ended</h3>
+          <p id="postcall-sub">Thank you for using AirTook™</p>
+        </div>
+      </div>
+
+      <div class="postcall-meta">
+        <div class="postcall-meta-item">
+          <span class="postcall-meta-label">Duration</span>
+          <span class="postcall-meta-value" id="postcall-duration">—</span>
+        </div>
+        <div class="postcall-meta-item" id="postcall-provider-wrap" style="display:none;">
+          <span class="postcall-meta-label">Provider</span>
+          <span class="postcall-meta-value" id="postcall-provider">—</span>
+        </div>
+      </div>
+
+      <div class="rating-section" id="rating-section">
+        <h4 id="rating-label">How was your consultation?</h4>
+        <div class="star-row" id="star-row">
+          {% for i in [1,2,3,4,5] %}
+          <button class="star-btn" data-value="{{ i }}" onclick="setRating({{ i }})">
+            <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="#D0D7DE" stroke-width="1.5" stroke-linejoin="round">
+              <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
+            </svg>
+          </button>
+          {% endfor %}
+        </div>
+        <textarea class="postcall-textarea" id="rating-comment" rows="3" placeholder="Share your experience (optional)…"></textarea>
+        <div style="margin-top:12px;display:flex;align-items:center;gap:10px;">
+          <button class="btn-pc primary" id="btn-submit-rating" onclick="submitRating()" disabled>
+            <svg viewBox="0 0 24 24" fill="none"><path d="M20 6L9 17L4 12" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/></svg>
+            Submit Rating
+          </button>
+          <div class="rating-submitted" id="rating-submitted">
+            <svg viewBox="0 0 24 24" fill="none"><path d="M20 6L9 17L4 12" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/></svg>
+            Thank you!
+          </div>
+        </div>
+      </div>
+
+      <div class="postcall-actions" id="postcall-actions">
+        <a class="btn-pc secondary" id="btn-rebook" href="/aira" style="display:none;">
+          <svg viewBox="0 0 24 24" fill="none"><rect x="3" y="4" width="18" height="18" rx="2" stroke="currentColor" stroke-width="2"/><path d="M16 2v4M8 2v4M3 10h18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+          Book New Appointment
+        </a>
+        <a class="btn-pc secondary" id="btn-patient-record" href="#" style="display:none;">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M9 12h6M9 16h6M17 21H7a2 2 0 01-2-2V5a2 2 0 012-2h7l5 5v11a2 2 0 01-2 2z" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+          View Patient Record
+        </a>
+        <a class="btn-pc ghost" id="btn-home" href="/">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+          Return to Dashboard
+        </a>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Error panel -->
+  <div id="vc-error">
+    <div class="error-icon-wrap">
+      <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2"/><path d="M12 8V12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="16" r="1" fill="currentColor"/></svg>
+    </div>
+    <div class="error-title" id="error-title">Unable to join</div>
+    <div class="error-msg" id="error-msg">An error occurred. Please refresh and try again.</div>
+  </div>
+
+</div>
+
+<!-- Agora Web SDK -->
+<script src="https://download.agora.io/sdk/release/AgoraRTC_N-4.22.0.js"></script>
+
 <script>
 (function () {
-  const SESSION_ID = "{{ session_id }}";
-  const SESSION_STATUS = "{{ session_status or '' }}";
-  const isGuest = {{ 1 if is_guest else 0 }};
-  const urlParams = new URLSearchParams(window.location.search);
-  const joinKey = urlParams.get("k");
-  const statusEl = document.getElementById("status");
-  const callWrap = document.getElementById("call-wrap");
-  const frameMount = document.getElementById("daily-frame");
-  const postcallPanel = document.getElementById("postcall-panel");
-  const sessionInfoBar = document.querySelector(".airtook-session-info");
-  const timerEl = document.getElementById("call-timer");
+  // ── Bootstrap ──────────────────────────────────────────────────────────────
+  var APP_ID       = "{{ app_id or '' }}";
+  var SESSION_ID   = "{{ session_id or '' }}";
+  var IS_GUEST     = {{ '1' if is_guest else '0' }};
 
-  // State
-  let currentRole = null;
-  let currentInfo = null;
-  let callStartTime = null;
-  let timerInterval = null;
-  let selectedRating = 0;
+  var urlParams    = new URLSearchParams(window.location.search);
+  var CHANNEL      = urlParams.get("ch")   || "";
+  var UID          = parseInt(urlParams.get("uid") || "0", 10);
+  var TOKEN        = urlParams.get("tok")  || "";
+  var ROLE         = urlParams.get("role") || "patient";   // "doctor" | "patient"
+  var APPOINTMENT  = urlParams.get("apt")  || "";
+  var DURATION     = parseInt(urlParams.get("dur") || "30", 10);
 
-  // ─── Remove ERPNext chrome ───────────────────────────────────────────────
-  window.addEventListener('DOMContentLoaded', function() {
-    ['body > header','body > nav','body > .navbar','body > footer',
-     'body > a[href*="/app"]','body > a[href*="/login"]',
-     'body > div:not(.airtook-container) > a[href*="/app"]',
-     'body > div:not(.airtook-container) > a[href*="/login"]'
-    ].forEach(function(sel) {
-      document.querySelectorAll(sel).forEach(function(el) { el.remove(); });
-    });
-  });
-
-  // ─── Status helper ───────────────────────────────────────────────────────
-  function setStatus(type, msg, showSpinner) {
-    if (!statusEl) return;
-    statusEl.style.display = 'flex';
-    statusEl.className = "airtook-status status-" + type;
-    const icon = showSpinner
-      ? '<div class="spinner"></div>'
-      : type === 'success'
-        ? '<svg class="airtook-status-icon" viewBox="0 0 24 24" fill="none"><path d="M20 6L9 17L4 12" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>'
-        : type === 'warning'
-        ? '<svg class="airtook-status-icon" viewBox="0 0 24 24" fill="none"><path d="M12 9V13M12 17H12.01M5.07 19h13.86C20.47 19 21.43 17.33 20.66 16L13.73 4c-.77-1.33-2.69-1.33-3.46 0L3.34 16C2.57 17.33 3.53 19 5.07 19Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>'
-        : type === 'danger'
-        ? '<svg class="airtook-status-icon" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2"/><path d="M12 8V12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="16" r="1" fill="currentColor"/></svg>'
-        : '<svg class="airtook-status-icon" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2"/><path d="M12 16V12M12 8H12.01" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
-    statusEl.innerHTML = icon + '<span>' + msg + '</span>';
+  // CSRF
+  function getCSRF() {
+    var m = document.querySelector('meta[name="csrf-token"]');
+    return m ? m.content : "";
   }
 
-  // ─── Duration timer ──────────────────────────────────────────────────────
+  // frappe.call polyfill
+  window.frappe = window.frappe || {};
+  if (!window.frappe.call) {
+    window.frappe.call = function (opts) {
+      var body = new URLSearchParams();
+      if (opts.args) Object.keys(opts.args).forEach(function (k) {
+        var v = opts.args[k];
+        body.append(k, v == null ? "" : String(v));
+      });
+      fetch("/api/method/" + opts.method, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded", "X-Frappe-CSRF-Token": getCSRF() },
+        credentials: "same-origin",
+        body: body.toString(),
+      })
+      .then(function (r) { return r.json(); })
+      .then(function (r) { if (opts.callback) opts.callback(r); })
+      .catch(function (e) { if (opts.error) opts.error(e); });
+    };
+  }
+
+  // ── Section helpers ────────────────────────────────────────────────────────
+  var _sections = ["vc-preload", "vc-call", "vc-postcall", "vc-error"];
+  function showSection(id) {
+    _sections.forEach(function (s) {
+      var el = document.getElementById(s);
+      if (el) el.classList.toggle("active", s === id);
+    });
+  }
+
+  function showError(title, msg) {
+    document.getElementById("error-title").textContent = title || "Error";
+    document.getElementById("error-msg").textContent   = msg   || "Please try again.";
+    showSection("vc-error");
+  }
+
+  // ── Timer ──────────────────────────────────────────────────────────────────
+  var _callStart = null, _timerInterval = null;
+
   function startTimer() {
-    callStartTime = Date.now();
-    timerEl.classList.add('visible');
-    timerInterval = setInterval(function() {
-      const secs = Math.floor((Date.now() - callStartTime) / 1000);
-      const m = String(Math.floor(secs / 60)).padStart(2, '0');
-      const s = String(secs % 60).padStart(2, '0');
-      timerEl.textContent = m + ':' + s;
+    _callStart = Date.now();
+    _timerInterval = setInterval(function () {
+      var s = Math.floor((Date.now() - _callStart) / 1000);
+      var m = String(Math.floor(s / 60)).padStart(2, "0");
+      document.getElementById("call-timer").textContent = m + ":" + String(s % 60).padStart(2, "0");
     }, 1000);
   }
 
   function stopTimer() {
-    clearInterval(timerInterval);
-    timerEl.classList.remove('visible');
-    if (!callStartTime) return '—';
-    const secs = Math.floor((Date.now() - callStartTime) / 1000);
-    const m = Math.floor(secs / 60);
-    const s = secs % 60;
-    return m > 0 ? m + ' min ' + s + ' sec' : s + ' sec';
+    clearInterval(_timerInterval);
+    if (!_callStart) return "—";
+    var s = Math.floor((Date.now() - _callStart) / 1000);
+    var m = Math.floor(s / 60);
+    return m > 0 ? m + " min " + (s % 60) + " sec" : s + " sec";
   }
 
-  // ─── API helpers (frappe.call) ────────────────────────────────────────────
-  function getJoinInfo() {
-    return new Promise(function(resolve, reject) {
-      const args = { session_id: SESSION_ID };
-      if (joinKey) args.k = joinKey;
-      frappe.call({
-        method: "airtook_video.airtook_video.api.get_join_info",
-        args: args,
-        callback: function(r) {
-          if (r && r.message) resolve(r.message);
-          else reject(new Error("Invalid response from server"));
-        },
-        error: function(r) {
-          let msg = "Unable to join consultation";
-          try {
-            const raw = JSON.parse(r._server_messages || "[]")[0] || msg;
-            const tmp = document.createElement("div");
-            tmp.innerHTML = raw;
-            msg = (tmp.textContent || tmp.innerText || msg).trim();
-          } catch(e) {}
-          reject(new Error(msg));
-        },
-      });
+  // ── Agora client ───────────────────────────────────────────────────────────
+  var client = AgoraRTC.createClient({ mode: "rtc", codec: "vp8" });
+  var localAudio = null, localVideo = null;
+  var remoteJoined = false;
+  var _micOn = true, _camOn = true;
+  var _currentRole = ROLE;
+  var _sessionEnded = false;
+
+  // ── Validate params ────────────────────────────────────────────────────────
+  if (!APP_ID || !CHANNEL || !UID || !TOKEN) {
+    showError(
+      "Invalid Session Link",
+      "This consultation link is missing required parameters. Please use the link sent to you."
+    );
+    return;
+  }
+
+  // ── Remove ERPNext chrome ──────────────────────────────────────────────────
+  document.addEventListener("DOMContentLoaded", function () {
+    ["body > header","body > nav","body > .navbar","body > footer",
+     "body > a[href*='/app']","body > a[href*='/login']"].forEach(function (sel) {
+      document.querySelectorAll(sel).forEach(function (el) { el.remove(); });
     });
-  }
+  });
 
-  function endSession() {
-    frappe.call({
-      method: "airtook_video.airtook_video.api.end_session",
-      args: { session_id: SESSION_ID },
-      error: function(e) { console.warn("end_session failed:", e); },
-    });
-  }
-
-  // ─── Rating ──────────────────────────────────────────────────────────────
-  window.setRating = function(val) {
-    selectedRating = val;
-    document.querySelectorAll('.star-btn svg').forEach(function(svg, i) {
-      if (i < val) {
-        svg.style.fill = '#FFB800';
-        svg.style.stroke = '#FFB800';
-      } else {
-        svg.style.fill = 'none';
-        svg.style.stroke = '#D0D7DE';
+  // ── init Agora ─────────────────────────────────────────────────────────────
+  async function initAgora() {
+    // Remote user published
+    client.on("user-published", async function (user, mediaType) {
+      await client.subscribe(user, mediaType);
+      if (mediaType === "video") {
+        document.getElementById("waiting-overlay").classList.add("hidden");
+        user.videoTrack.play("remote-video");
+        if (!remoteJoined) {
+          remoteJoined = true;
+          startTimer();
+        }
+      }
+      if (mediaType === "audio") {
+        user.audioTrack.play();
       }
     });
-    document.getElementById('submit-rating-btn').disabled = false;
+
+    client.on("user-unpublished", function (user, mediaType) {
+      if (mediaType === "video") {
+        document.getElementById("remote-video").innerHTML = "";
+        document.getElementById("waiting-overlay").classList.remove("hidden");
+        remoteJoined = false;
+      }
+    });
+
+    await client.join(APP_ID, CHANNEL, TOKEN, UID);
+
+    var tracks = await AgoraRTC.createMicrophoneAndCameraTracks();
+    localAudio = tracks[0];
+    localVideo = tracks[1];
+
+    localVideo.play("local-video");
+    await client.publish([localAudio, localVideo]);
+  }
+
+  // ── Doctor flow ────────────────────────────────────────────────────────────
+  async function doctorReady() {
+    document.getElementById("preload-spinner").style.display = "none";
+    document.getElementById("preload-title").textContent = "Ready to start";
+    document.getElementById("preload-sub").textContent = "Your patient has been notified. Click Start when you're ready.";
+    document.getElementById("btn-start-consult").style.display = "inline-flex";
+  }
+
+  window.startConsultation = async function () {
+    var btn = document.getElementById("btn-start-consult");
+    btn.disabled = true;
+    btn.textContent = "Starting…";
+
+    // Notify server → publishes realtime to patient
+    frappe.call({
+      method: "airtook_video.airtook_video.api.start_session_timer",
+      args: { session_id: SESSION_ID },
+    });
+
+    try {
+      await initAgora();
+      showSection("vc-call");
+      document.getElementById("waiting-overlay").classList.add("hidden");
+    } catch (e) {
+      showError("Connection Failed", e && e.message ? e.message : "Unable to start consultation.");
+    }
   };
 
-  window.submitRating = function() {
-    const comment = document.getElementById('rating-comment').value.trim();
-    const btn = document.getElementById('submit-rating-btn');
-    if (selectedRating === 0) return;
+  // ── Patient flow ──────────────────────────────────────────────────────────
+  var _pollInterval = null;
+
+  async function patientJoin() {
+    document.getElementById("preload-title").textContent = "Joining consultation…";
+    document.getElementById("preload-sub").textContent   = "Connecting securely";
+
+    try {
+      await initAgora();
+      showSection("vc-call");
+      // Show waiting overlay until doctor publishes video
+      document.getElementById("waiting-overlay").classList.remove("hidden");
+      document.getElementById("preload-title").textContent = "Waiting for doctor…";
+    } catch (e) {
+      showError("Connection Failed", e && e.message ? e.message : "Unable to join consultation.");
+    }
+  }
+
+  // ── Controls ──────────────────────────────────────────────────────────────
+  window.toggleMic = function () {
+    if (!localAudio) return;
+    _micOn = !_micOn;
+    if (_micOn) { localAudio.setMuted(false); } else { localAudio.setMuted(true); }
+    document.getElementById("btn-mic").className = "ctrl-btn " + (_micOn ? "on" : "off");
+    document.getElementById("icon-mic-on").style.display  = _micOn ? "" : "none";
+    document.getElementById("icon-mic-off").style.display = _micOn ? "none" : "";
+    document.getElementById("lbl-mic").textContent = _micOn ? "Mute" : "Unmute";
+  };
+
+  window.toggleCam = function () {
+    if (!localVideo) return;
+    _camOn = !_camOn;
+    if (_camOn) { localVideo.setEnabled(true); } else { localVideo.setEnabled(false); }
+    document.getElementById("btn-cam").className = "ctrl-btn " + (_camOn ? "on" : "off");
+    document.getElementById("icon-cam-on").style.display  = _camOn ? "" : "none";
+    document.getElementById("icon-cam-off").style.display = _camOn ? "none" : "";
+    document.getElementById("lbl-cam").textContent = _camOn ? "Stop Video" : "Start Video";
+  };
+
+  window.confirmEnd = function () {
+    var isDoc = ROLE === "doctor";
+    document.getElementById("confirm-title").textContent =
+      isDoc ? "End consultation for everyone?" : "Leave this consultation?";
+    document.getElementById("confirm-body").textContent =
+      isDoc
+        ? "Ending will close the session for both you and the patient."
+        : "You can rejoin if the consultation is still active.";
+    document.getElementById("end-confirm").classList.add("active");
+  };
+
+  window.cancelEnd = function () {
+    document.getElementById("end-confirm").classList.remove("active");
+  };
+
+  window.executeEnd = async function () {
+    if (_sessionEnded) return;
+    _sessionEnded = true;
+    document.getElementById("btn-confirm-end-yes").disabled = true;
+    document.getElementById("btn-confirm-end-yes").textContent = "Ending…";
+
+    var duration = stopTimer();
+
+    // Doctor formally ends the session (triggers earnings credit + AI summary)
+    if (ROLE === "doctor") {
+      frappe.call({
+        method: "airtook_video.airtook_video.api.end_session",
+        args: { session_id: SESSION_ID },
+      });
+    }
+
+    // Leave Agora channel
+    try {
+      if (localAudio) { localAudio.stop(); localAudio.close(); }
+      if (localVideo) { localVideo.stop(); localVideo.close(); }
+      await client.leave();
+    } catch (e) {}
+
+    showPostcall(duration);
+  };
+
+  // ── Post-call ─────────────────────────────────────────────────────────────
+  function showPostcall(duration) {
+    showSection("vc-postcall");
+    document.getElementById("postcall-duration").textContent = duration || "—";
+
+    if (ROLE === "doctor") {
+      document.getElementById("postcall-title").textContent = "Consultation complete";
+      document.getElementById("postcall-sub").textContent = "Session summary for your records";
+      document.getElementById("rating-label").textContent = "Rate this consultation";
+      document.getElementById("rating-comment").placeholder = "Clinical observations (optional)…";
+      document.getElementById("btn-patient-record").style.display = "inline-flex";
+      document.getElementById("btn-home").href = "/doctor";
+    } else {
+      document.getElementById("postcall-title").textContent = "Consultation ended";
+      document.getElementById("postcall-sub").textContent = "We hope your consultation went well";
+      document.getElementById("rating-label").textContent = "How was your doctor?";
+      document.getElementById("btn-rebook").style.display = "inline-flex";
+      document.getElementById("btn-home").href = "/patient_access";
+    }
+  }
+
+  // ── Rating ────────────────────────────────────────────────────────────────
+  var _selectedRating = 0;
+
+  window.setRating = function (val) {
+    _selectedRating = val;
+    document.querySelectorAll(".star-btn svg").forEach(function (svg, i) {
+      svg.style.fill   = i < val ? "#FFB800" : "none";
+      svg.style.stroke = i < val ? "#FFB800" : "#D0D7DE";
+    });
+    document.getElementById("btn-submit-rating").disabled = false;
+  };
+
+  window.submitRating = function () {
+    if (_selectedRating === 0) return;
+    var btn = document.getElementById("btn-submit-rating");
     btn.disabled = true;
-    btn.innerHTML = '<div class="spinner" style="width:16px;height:16px;border-width:2px;"></div> Submitting…';
+    btn.innerHTML = '<div style="width:14px;height:14px;border:2px solid rgba(255,255,255,.5);border-top-color:white;border-radius:50%;animation:spin .8s linear infinite;display:inline-block;"></div>';
 
     frappe.call({
       method: "airtook_video.airtook_video.api.submit_rating",
       args: {
-        session_id: SESSION_ID,
-        rating: selectedRating,
-        comment: comment,
-        rated_by_role: currentRole,
+        session_id:     SESSION_ID,
+        rating:         _selectedRating,
+        comment:        document.getElementById("rating-comment").value.trim(),
+        rated_by_role:  ROLE,
       },
-      callback: function(r) {
-        // Success — dim the section and show confirmation
-        document.getElementById('rating-section').style.opacity = '0.6';
-        document.getElementById('rating-section').style.pointerEvents = 'none';
-        btn.style.display = 'none';
-        const confirmed = document.getElementById('rating-submitted');
-        confirmed.style.display = 'flex';
+      callback: function () {
+        document.getElementById("rating-section").style.opacity = "0.6";
+        document.getElementById("rating-section").style.pointerEvents = "none";
+        btn.style.display = "none";
+        document.getElementById("rating-submitted").style.display = "flex";
       },
-      error: function(r) {
-        // If fields don't exist yet on DocType, still show confirmation to user
-        // so the UI doesn't stay stuck — log the real error to console
-        console.warn("submit_rating error (fields may not exist on DocType yet):", r);
-        document.getElementById('rating-section').style.opacity = '0.6';
-        document.getElementById('rating-section').style.pointerEvents = 'none';
-        btn.style.display = 'none';
-        const confirmed = document.getElementById('rating-submitted');
-        confirmed.style.display = 'flex';
+      error: function () {
+        document.getElementById("rating-section").style.opacity = "0.6";
+        document.getElementById("rating-section").style.pointerEvents = "none";
+        btn.style.display = "none";
+        document.getElementById("rating-submitted").style.display = "flex";
       },
     });
   };
 
-  // ─── Rejoin ───────────────────────────────────────────────────────────────
-  window.rejoinCall = function() {
-    postcallPanel.style.display = 'none';
-    if (sessionInfoBar) sessionInfoBar.style.display = 'flex';
-    setStatus('info', 'Reconnecting…', true);
-    statusEl.style.display = 'flex';
-    start();
-  };
+  // ── Draggable PIP ─────────────────────────────────────────────────────────
+  (function () {
+    var pip = document.getElementById("local-video");
+    var dx = 0, dy = 0, sx = 0, sy = 0, dragging = false;
 
-  // ─── Post-call panel ─────────────────────────────────────────────────────
-  function showPostcall(role, info, duration) {
-    if (statusEl) statusEl.style.display = 'none';
-    if (sessionInfoBar) sessionInfoBar.style.display = 'none';
-    callWrap.style.display = 'none';
-    postcallPanel.style.display = 'block';
-
-    document.getElementById('postcall-duration').textContent = duration || '—';
-
-    if (role === 'practitioner') {
-      document.getElementById('postcall-title').textContent = 'Consultation complete';
-      document.getElementById('postcall-subtitle').textContent = 'Session summary for your records';
-      document.getElementById('rating-label').textContent = 'Rate this consultation / patient';
-      document.getElementById('rating-comment').placeholder = 'Clinical notes or observations (optional)…';
-      document.getElementById('btn-patient-record').style.display = 'inline-flex';
-      document.getElementById('btn-return-home').href = '/doctor';
-      if (info && info.patient_user) {
-        document.getElementById('btn-patient-record').href =
-          '/app/patient?user=' + encodeURIComponent(info.patient_user);
-      }
-    } else {
-      document.getElementById('postcall-title').textContent = 'Consultation ended';
-      document.getElementById('postcall-subtitle').textContent = 'We hope your consultation went well';
-      document.getElementById('rating-label').textContent = 'How was your doctor?';
-      document.getElementById('rating-comment').placeholder = 'Share your experience (optional)…';
-      document.getElementById('btn-rebook').style.display = 'inline-flex';
-      document.getElementById('btn-return-home').href = '/patient_access';
-      if (info && info.practitioner) {
-        document.getElementById('postcall-provider-meta').style.display = 'flex';
-        document.getElementById('postcall-provider-name').textContent = info.display_name || info.practitioner;
-      }
-    }
-
-    // Show Rejoin only if session is still Active (not ended by practitioner)
-    frappe.call({
-      method: "airtook_video.airtook_video.api.get_session_status",
-      args: { session_id: SESSION_ID },
-      callback: function(r) {
-        if (r && r.message && r.message.status === 'Active') {
-          document.getElementById('btn-rejoin').style.display = 'inline-flex';
-        }
-      },
+    pip.addEventListener("mousedown", function (e) {
+      e.preventDefault();
+      sx = e.clientX; sy = e.clientY;
+      dragging = true;
     });
+    document.addEventListener("mousemove", function (e) {
+      if (!dragging) return;
+      dx = e.clientX - sx; dy = e.clientY - sy;
+      sx = e.clientX; sy = e.clientY;
+      pip.style.right = "auto";
+      pip.style.bottom = "auto";
+      pip.style.left = (pip.offsetLeft + dx) + "px";
+      pip.style.top  = (pip.offsetTop  + dy) + "px";
+    });
+    document.addEventListener("mouseup", function () { dragging = false; });
+  })();
+
+  // ── Entry point ───────────────────────────────────────────────────────────
+  if (ROLE === "doctor") {
+    doctorReady();
+  } else {
+    patientJoin();
   }
 
-  // ─── Device check ─────────────────────────────────────────────────────────
-  async function checkDeviceSupport() {
-    try {
-      const devices = await navigator.mediaDevices.enumerateDevices();
-      const hasCamera = devices.some(function(d) { return d.kind === 'videoinput'; });
-      const hasMic    = devices.some(function(d) { return d.kind === 'audioinput'; });
-      if (!hasCamera || !hasMic) {
-        setStatus('warning', 'Warning: No ' + (!hasCamera ? 'camera' : 'microphone') +
-          ' detected. Please check your device permissions.', false);
-      }
-    } catch(e) { console.warn('Device check failed:', e); }
-  }
-
-  // ─── Main start ───────────────────────────────────────────────────────────
-  async function start() {
-    if (!SESSION_ID) {
-      setStatus("danger", "Missing session identifier.", false);
-      return;
-    }
-    if (SESSION_STATUS === "Ended") return;
-    if (isGuest && !joinKey) {
-      setStatus("warning", "Please log in to join this consultation.", false);
-      return;
-    }
-
-    await checkDeviceSupport();
-
-    try {
-      setStatus("info", "Connecting to secure consultation room…", true);
-      const info = await getJoinInfo();
-      currentInfo = info;
-      currentRole = info.role;
-
-      if (info.status === "Ended") {
-        setStatus("warning", "This consultation session has already ended.", false);
-        return;
-      }
-
-      if (!info.room_url || !info.token) throw new Error("Invalid meeting credentials received");
-
-      setStatus("info", "Joining consultation…", true);
-
-      const callFrame = window.DailyIframe.createFrame(frameMount, {
-        showLeaveButton: true,
-        iframeStyle: { width: '100%', height: '100%', border: 'none' }
-      });
-
-      callWrap.style.display = "block";
-
-      callFrame.on('joined-meeting', function() {
-        setStatus('success', 'Connected — consultation is live and encrypted.', false);
-        startTimer();
-        setTimeout(function() {
-          if (statusEl) statusEl.style.display = 'none';
-        }, 3000);
-      });
-
-      callFrame.on('left-meeting', async function() {
-        const duration = stopTimer();
-
-        if (info.role === "practitioner") {
-          endSession();
-        }
-
-        showPostcall(info.role, info, duration);
-      });
-
-      callFrame.on('error', function(error) {
-        stopTimer();
-        setStatus('danger', 'Connection error: ' + (error.errorMsg || 'Please refresh and try again'), false);
-      });
-
-      await callFrame.join({
-        url: info.room_url,
-        token: info.token,
-        userName: info.display_name || "AirTook User"
-      });
-
-    } catch (err) {
-      console.error(err);
-      setStatus("danger", err && err.message ? err.message : "Unable to connect. Please refresh.", false);
-    }
-  }
-
-  start();
 })();
 </script>
+
+{% endif %}
 {% endblock %}

@@ -1,629 +1,360 @@
 # -*- coding: utf-8 -*-
-import secrets
+import base64
+import hashlib
+import hmac
+import random
+import struct
+import time
+import zlib
+
 import frappe
 from frappe import _
-from frappe.utils import add_to_date, now_datetime, get_url
+from frappe.utils import now_datetime, get_url
 
-from .daily import (
-    daily_create_room,
-    daily_create_meeting_token,
-    daily_get_room,
-)
+SESSION_DTYPE = "AirTook Video Session"
+DEFAULT_DURATION_MINUTES = 30
+TOKEN_EXPIRE_SECONDS = 7200  # 2 hours
 
-SESSION_DTYPE = "Video Consultation Session"
+ROLE_PUBLISHER   = 1
+ROLE_SUBSCRIBER  = 2
 
-JOIN_KEY_TTL_MINUTES = 60
-JOIN_EARLY_MINUTES   = 10
-SESSION_EXPIRE_AFTER_MINUTES = 60
-DEFAULT_APPT_DURATION_MINUTES = 30
-
-# Extension pricing: 20% discount applied to per-minute rate
 EXTENSION_DISCOUNT_PCT = 20
 
 
-# ─── helpers ────────────────────────────────────────────────────────────────
+# ─── Agora credentials ───────────────────────────────────────────────────────
 
-def _generate_join_key():
-    return secrets.token_urlsafe(24)
+def _get_agora_credentials():
+    app_id = (
+        frappe.db.get_single_value("AirTook Configuration", "agora_app_id") or
+        frappe.conf.get("agora_app_id") or ""
+    ).strip()
+    certificate = (
+        frappe.db.get_single_value("AirTook Configuration", "agora_app_certificate") or
+        frappe.conf.get("agora_app_certificate") or ""
+    ).strip()
+    if not app_id or not certificate:
+        frappe.throw(
+            _("Agora credentials not configured. Set agora_app_id and agora_app_certificate."),
+            frappe.ValidationError,
+        )
+    return app_id, certificate
 
-def _is_expired(dt):
-    return (not dt) or (now_datetime() > dt)
+
+# ─── Token generation ────────────────────────────────────────────────────────
+
+def _generate_uid():
+    return random.randint(100000, 999999)
+
+
+def _generate_agora_token_manual(app_id, app_certificate, channel_name, uid, role, expire_ts):
+    """
+    Agora AccessToken (DynamicKey5) HMAC-SHA256 implementation.
+    Matches the reference implementation at github.com/AgoraIO/Tools/DynamicKey/AgoraDynamicKey.
+    """
+    ts   = int(time.time())
+    salt = random.randint(1, 0x7FFFFFFF)
+    uid_str = str(uid)
+
+    privileges = {1: expire_ts}  # join channel
+    if role == ROLE_PUBLISHER:
+        privileges[2] = expire_ts  # publish audio
+        privileges[3] = expire_ts  # publish video
+        privileges[4] = expire_ts  # publish data stream
+
+    msg = struct.pack("<H", len(privileges))
+    for k in sorted(privileges.keys()):
+        msg += struct.pack("<HI", k, privileges[k])
+
+    signing = (app_id + channel_name + uid_str).encode("utf-8") + msg
+    signature = hmac.new(app_certificate.encode("utf-8"), signing, hashlib.sha256).digest()
+
+    crc_chan = zlib.crc32(channel_name.encode("utf-8")) & 0xFFFFFFFF
+    crc_uid  = zlib.crc32(uid_str.encode("utf-8"))      & 0xFFFFFFFF
+
+    content = (
+        struct.pack("<I", salt) +
+        struct.pack("<I", ts) +
+        struct.pack("<H", len(signature)) + signature +
+        struct.pack("<I", crc_chan) +
+        struct.pack("<I", crc_uid) +
+        struct.pack("<H", len(msg)) + msg
+    )
+    return "006" + base64.b64encode(content).decode("utf-8")
+
+
+def _generate_agora_token(app_id, app_certificate, channel_name, uid,
+                          role=ROLE_PUBLISHER, expire_seconds=TOKEN_EXPIRE_SECONDS):
+    expire_ts = int(time.time()) + expire_seconds
+    try:
+        from agora_token_builder import RtcTokenBuilder
+        return RtcTokenBuilder.buildTokenWithUid(
+            app_id, app_certificate, channel_name, uid, role, expire_ts
+        )
+    except ImportError:
+        pass
+    except Exception:
+        frappe.log_error(frappe.get_traceback(), "agora_token_builder failed — using manual fallback")
+    return _generate_agora_token_manual(app_id, app_certificate, channel_name, uid, role, expire_ts)
+
+
+# ─── Helpers ─────────────────────────────────────────────────────────────────
 
 def _require_login():
     if frappe.session.user == "Guest":
         frappe.throw(_("Login required"), frappe.PermissionError)
 
-def _room_name(prefix="airtook"):
-    return f"{prefix}-{secrets.token_urlsafe(8).lower()}"
-
-def _get_user_display_name(user):
-    try:
-        from frappe.utils import get_fullname
-        name = get_fullname(user)
-        return name or user
-    except Exception:
-        first = frappe.db.get_value("User", user, "first_name") or ""
-        last  = frappe.db.get_value("User", user, "last_name")  or ""
-        return f"{first} {last}".strip() or user
-
-def _require_valid_user(user_id):
-    if not user_id or not frappe.db.exists("User", user_id):
-        frappe.throw(_("Invalid patient user"), frappe.ValidationError)
-
-def _resolve_department(dept):
-    if not dept:
-        return None
-    dept = dept.strip()
-    if frappe.db.exists("Medical Department", dept):
-        return dept
-    rows = frappe.get_all("Medical Department", fields=["name"], limit_page_length=300)
-    matches = [r["name"] for r in rows if (r.get("name") or "").startswith(dept)]
-    if len(matches) == 1:
-        return matches[0]
-    if len(matches) > 1:
-        frappe.throw(f"Ambiguous department: '{dept}'", frappe.ValidationError)
-    frappe.throw(f"Unknown department: '{dept}'", frappe.ValidationError)
-
-def _pick_practitioner(dept):
-    if not dept:
-        return None
-    rows = frappe.get_all(
-        "Healthcare Practitioner",
-        filters={"status": "Active", "department": dept},
-        fields=["name", "user_id"],
-        order_by="modified desc",
-        limit_page_length=50,
-    )
-    for r in rows:
-        if r.get("user_id"):
-            return r["name"]
-    return None
 
 def _get_practitioner_user(practitioner_name):
     if not practitioner_name:
         return None
     return frappe.db.get_value("Healthcare Practitioner", practitioner_name, "user_id")
 
+
 def _patient_user_from_patient(patient_name):
     if not patient_name:
         return None
     return frappe.db.get_value("Patient", patient_name, "user_id")
 
-def _get_fee_per_minute(appointment_type, mode):
-    """Return per-minute fee in NGN based on appointment type."""
+
+def _get_fee_per_minute(appointment_type, mode="Video"):
     PRICES = {
-        "Priority Consultation 15min":  4499,
-        "Priority Consultation 30min":  7499,
-        "Priority Consultation 45min":  9999,
-        "Priority Consultation 60min":  12499,
+        "Priority Consultation 15min": 4499,
+        "Priority Consultation 30min": 7499,
+        "Priority Consultation 45min": 9999,
+        "Priority Consultation 60min": 12499,
         "Scheduled Consultation 15min": 2999,
         "Scheduled Consultation 30min": 4999,
         "Scheduled Consultation 45min": 6499,
         "Scheduled Consultation 60min": 7999,
-        "Quick Consultation":           7499,
-        "General Consultation":         4999,
+        "Quick Consultation": 7499,
+        "General Consultation": 4999,
     }
-    base = PRICES.get(appointment_type or "", 4999)
+    base    = PRICES.get(appointment_type or "", 4999)
     minutes = 30
     for suffix in ["15min", "30min", "45min", "60min"]:
         if (appointment_type or "").endswith(suffix):
             minutes = int(suffix.replace("min", ""))
             break
-    # Return per-minute rate
     return round(base / minutes, 2)
 
 
-# ─── create_session ─────────────────────────────────────────────────────────
+def _build_join_url(session_name, channel_name, uid, token, role, appointment_name, duration_minutes):
+    from urllib.parse import urlencode
+    params = urlencode({
+        "ch":   channel_name,
+        "uid":  uid,
+        "tok":  token,
+        "role": role,
+        "apt":  appointment_name or "",
+        "dur":  duration_minutes,
+    })
+    return f"{get_url()}/video/{session_name}?{params}"
+
+
+def _build_session_response(doc, doctor_token=None, patient_token=None):
+    app_id = (
+        frappe.db.get_single_value("AirTook Configuration", "agora_app_id") or
+        frappe.conf.get("agora_app_id") or ""
+    )
+    if not doctor_token or not patient_token:
+        try:
+            app_cert = (
+                frappe.db.get_single_value("AirTook Configuration", "agora_app_certificate") or
+                frappe.conf.get("agora_app_certificate") or ""
+            )
+            if app_cert:
+                doctor_token  = _generate_agora_token(app_id, app_cert, doc.channel_name, doc.doctor_uid, ROLE_PUBLISHER)
+                patient_token = _generate_agora_token(app_id, app_cert, doc.channel_name, doc.patient_uid, ROLE_PUBLISHER)
+        except Exception:
+            doctor_token  = doctor_token  or ""
+            patient_token = patient_token or ""
+
+    dur = int(doc.duration_minutes or DEFAULT_DURATION_MINUTES)
+    doctor_join_url  = _build_join_url(doc.name, doc.channel_name, doc.doctor_uid,  doctor_token,  "doctor",  doc.appointment, dur)
+    patient_join_url = _build_join_url(doc.name, doc.channel_name, doc.patient_uid, patient_token, "patient", doc.appointment, dur)
+
+    return {
+        "session_id":        doc.name,
+        "appointment":       doc.appointment or "",
+        "channel_name":      doc.channel_name,
+        "app_id":            app_id,
+        "doctor_uid":        doc.doctor_uid,
+        "patient_uid":       doc.patient_uid,
+        "doctor_token":      doctor_token  or "",
+        "patient_token":     patient_token or "",
+        "doctor_join_url":   doctor_join_url,
+        "patient_join_url":  patient_join_url,
+        "video_join_url":    patient_join_url,   # backwards-compat alias for callers
+        "status":            doc.status,
+        "duration_minutes":  dur,
+        "extensions_count":  int(getattr(doc, "extensions_count", 0) or 0),
+    }
+
+
+# ─── create_session ──────────────────────────────────────────────────────────
 
 @frappe.whitelist(methods=["GET", "POST"])
-def create_session(patient_appointment=None, department=None, practitioner=None,
-                   patient_user=None, allow_magic_link=1, consultation_mode="Video",
-                   duration_minutes=None, **kwargs):
+def create_session(patient_appointment=None, appointment_name=None,
+                   duration_minutes=None, consultation_mode="Video", **kwargs):
     _require_login()
 
-    session_type = "Scheduled" if patient_appointment else "Quick Consult"
-    patient = None
-    dept = department
-    appt_type = None
+    appt_name = appointment_name or patient_appointment
+    if not appt_name:
+        frappe.throw(_("appointment_name is required"), frappe.ValidationError)
 
-    if patient_appointment:
-        appt = frappe.get_doc("Patient Appointment", patient_appointment)
+    # Reuse an existing non-completed session for this appointment
+    existing = frappe.db.get_value(
+        SESSION_DTYPE,
+        {"appointment": appt_name, "status": ["not in", ["completed", "expired"]]},
+        "name",
+    )
+    if existing:
+        doc = frappe.get_doc(SESSION_DTYPE, existing, ignore_permissions=True)
+        return _build_session_response(doc)
 
-        # Reuse existing session if already linked
-        existing_session = getattr(appt, "airtook_video_session", None)
-        if existing_session and frappe.db.exists(SESSION_DTYPE, existing_session):
-            existing = frappe.get_doc(SESSION_DTYPE, existing_session, ignore_permissions=True)
-            payload = _session_payload(existing)
-            return payload
+    appt = frappe.get_doc("Patient Appointment", appt_name)
+    patient      = getattr(appt, "patient", None)
+    practitioner = getattr(appt, "practitioner", None)
+    appt_type    = getattr(appt, "appointment_type", None)
 
-        patient   = getattr(appt, "patient", None)
-        dept      = getattr(appt, "department", None) or dept or "General Practice"
-        practitioner = practitioner or getattr(appt, "practitioner", None)
-        appt_type = getattr(appt, "appointment_type", None)
-        # Read duration from appointment type string if not explicitly passed
-        if not duration_minutes:
-            for mins in [15, 30, 45, 60]:
-                if (appt_type or "").endswith(f"{mins}min"):
-                    duration_minutes = mins
-                    break
+    if not duration_minutes:
+        for mins in [15, 30, 45, 60]:
+            if (appt_type or "").endswith(f"{mins}min"):
+                duration_minutes = mins
+                break
+    duration_minutes = int(duration_minutes or DEFAULT_DURATION_MINUTES)
 
-    dept = _resolve_department(dept)
-    if not dept:
-        frappe.throw("Department is required", frappe.ValidationError)
+    patient_user = _patient_user_from_patient(patient) if patient else frappe.session.user
 
-    prac = practitioner or _pick_practitioner(dept)
+    app_id, app_certificate = _get_agora_credentials()
 
-    appt_patient_user = _patient_user_from_patient(patient) if patient else None
-    final_patient_user = appt_patient_user or patient_user or frappe.session.user
-    _require_valid_user(final_patient_user)
+    # Sanitise channel name: lowercase alphanumerics + hyphens, max 64 chars
+    raw_channel = f"at-{appt_name.lower()}-{random.randint(1000, 9999)}"
+    channel_name = "".join(c if c.isalnum() or c == "-" else "-" for c in raw_channel)[:64]
 
-    booked_by  = frappe.session.user
-    allow_magic = 1 if str(allow_magic_link) in ("1", "true", "True", "yes", "on") else 0
-    mode = consultation_mode if consultation_mode in ("Video", "Audio") else "Video"
-    dur  = int(duration_minutes or DEFAULT_APPT_DURATION_MINUTES)
+    doctor_uid  = _generate_uid()
+    patient_uid = _generate_uid()
 
-    # Daily.co room — audio-only uses start_video_off
-    room_name = _room_name("airtook")
-    room_props = {}
-    if mode == "Audio":
-        room_props["start_video_off"] = True
-    try:
-        room = daily_create_room(room_name, extra_properties=room_props)
-    except Exception as e:
-        err = str(e)
-        if "daily_api_key" in err or "Missing" in err:
-            frappe.throw(
-                "Video consultations are temporarily unavailable. Please contact support.",
-                frappe.ValidationError,
-            )
-        raise
-
-    daily_room_name = room.get("name") or room_name
-    room_url = room.get("url")
+    doctor_token  = _generate_agora_token(app_id, app_certificate, channel_name, doctor_uid,  ROLE_PUBLISHER)
+    patient_token = _generate_agora_token(app_id, app_certificate, channel_name, patient_uid, ROLE_PUBLISHER)
 
     doc = frappe.get_doc({
-        "doctype": SESSION_DTYPE,
-        "session_type": session_type,
-        "status": "Waiting",
-        "appointment": patient_appointment,
-        "patient": patient,
-        "patient_user": final_patient_user,
-        "booked_by": booked_by,
-        "allow_magic_link": allow_magic,
-        "practitioner": prac,
-        "department": dept,
-        "daily_room_name": daily_room_name,
-        "daily_room_url": room_url,
-        "consultation_mode": mode,
-        "duration_minutes": dur,
-        "participant_count": 0,
-        "extensions_count": 0,
+        "doctype":          SESSION_DTYPE,
+        "appointment":      appt_name,
+        "practitioner":     practitioner,
+        "patient":          patient,
+        "patient_user":     patient_user,
+        "channel_name":     channel_name,
+        "doctor_uid":       doctor_uid,
+        "patient_uid":      patient_uid,
+        "duration_minutes": duration_minutes,
+        "status":           "scheduled",
+        "created_at":       now_datetime(),
     })
     doc.insert(ignore_permissions=True)
 
-    # Link back to appointment
-    if patient_appointment and frappe.db.has_column("Patient Appointment", "airtook_video_session"):
-        frappe.db.set_value("Patient Appointment", patient_appointment,
-                            "airtook_video_session", doc.name)
-
-    # Generate magic link if enabled
-    join_key = None
-    expires_at = None
-    if allow_magic:
-        join_key  = _generate_join_key()
-        expires_at = add_to_date(now_datetime(), minutes=JOIN_KEY_TTL_MINUTES)
-        doc.db_set("patient_join_key", join_key, update_modified=False)
-        doc.db_set("patient_join_key_expires_at", expires_at, update_modified=False)
+    if frappe.db.has_column("Patient Appointment", "airtook_video_session"):
+        frappe.db.set_value("Patient Appointment", appt_name, "airtook_video_session", doc.name)
 
     frappe.db.commit()
-
-    payload = _session_payload(doc)
-    if join_key:
-        payload["patient_join_url"] = f"{get_url()}/video/{doc.name}?k={join_key}"
-        payload["patient_join_expires_at"] = str(expires_at)
-    return payload
+    return _build_session_response(doc, doctor_token=doctor_token, patient_token=patient_token)
 
 
-def _session_payload(doc):
-    return {
-        "session_id": doc.name,
-        "session_type": doc.session_type,
-        "status": doc.status,
-        "department": doc.department,
-        "practitioner": doc.practitioner,
-        "room_name": doc.daily_room_name,
-        "room_url": doc.daily_room_url,
-        "patient_user": doc.patient_user,
-        "booked_by": doc.booked_by,
-        "allow_magic_link": doc.allow_magic_link,
-        "consultation_mode": getattr(doc, "consultation_mode", "Video") or "Video",
-        "duration_minutes": getattr(doc, "duration_minutes", DEFAULT_APPT_DURATION_MINUTES) or DEFAULT_APPT_DURATION_MINUTES,
-        "extensions_count": getattr(doc, "extensions_count", 0) or 0,
-    }
-
-
-# ─── get_join_info ───────────────────────────────────────────────────────────
-
-@frappe.whitelist(allow_guest=True, methods=["GET", "POST"])
-def get_join_info(session_id, k=None):
-    if not session_id:
-        frappe.throw("Missing session id")
-
-    doc = frappe.get_doc(SESSION_DTYPE, session_id, ignore_permissions=True)
-
-    if not doc.daily_room_name:
-        frappe.throw("Session has no Daily room assigned")
-    if not doc.get("patient_user"):
-        frappe.throw("Session is not linked to a patient account")
-
-    current_user     = frappe.session.user
-    is_guest         = current_user == "Guest"
-    practitioner_user = _get_practitioner_user(doc.practitioner) if doc.practitioner else None
-    is_owner         = (not is_guest and practitioner_user and practitioner_user == current_user)
-
-    # Determine role + display name
-    if is_owner:
-        role         = "practitioner"
-        display_name = _get_user_display_name(current_user)
-        if display_name and not display_name.lower().startswith("dr"):
-            display_name = f"Dr. {display_name}"
-        token_user_id = current_user
-    else:
-        role = "patient"
-        if is_guest:
-            if not k:
-                frappe.throw("Login required (missing join key)")
-            if not doc.get("allow_magic_link"):
-                frappe.throw("Magic link access is disabled for this consultation")
-            if not doc.patient_join_key or not doc.patient_join_key_expires_at:
-                frappe.throw("Join link is not enabled")
-            if k != doc.patient_join_key:
-                frappe.throw("Invalid join key")
-            if _is_expired(doc.patient_join_key_expires_at):
-                frappe.throw("Join link expired")
-            display_name  = _get_user_display_name(doc.patient_user)
-            token_user_id = doc.patient_user
-        else:
-            if doc.patient:
-                patient_user_id = _patient_user_from_patient(doc.patient)
-                if patient_user_id and patient_user_id != current_user:
-                    frappe.throw("Not permitted")
-            if doc.patient_user and doc.patient_user != current_user:
-                frappe.throw("Not permitted")
-            display_name  = _get_user_display_name(current_user)
-            token_user_id = current_user
-
-    # Access window check
-    now = now_datetime()
-    open_from, close_at, kind = _compute_access_window(doc)
-    if kind == "scheduled" and open_from and now < open_from:
-        frappe.throw("You're a bit early! You can join up to 10 minutes before your appointment time.")
-    if close_at and now > close_at:
-        if doc.status != "Ended":
-            doc.status = "Ended"
-            if not doc.get("ended_at"):
-                doc.db_set("ended_at", now, update_modified=False)
-            doc.save(ignore_permissions=True)
-        frappe.throw("This session has expired. Please book a new appointment.")
-    if doc.status == "Ended" and doc.get("ended_at"):
-        hard_close = add_to_date(doc.ended_at, minutes=SESSION_EXPIRE_AFTER_MINUTES)
-        if now > hard_close:
-            frappe.throw("This session has expired. Please book a new appointment.")
-
-    # Ensure Daily room still exists
-    room_url = None
-    try:
-        room = daily_get_room(doc.daily_room_name)
-        room_url = (room or {}).get("url")
-    except Exception:
-        pass
-
-    if not room_url:
-        if doc.status == "Ended":
-            frappe.throw("This consultation session has ended.")
-        new_room_name = _room_name("airtook")
-        mode = getattr(doc, "consultation_mode", "Video") or "Video"
-        extra = {"start_video_off": True} if mode == "Audio" else {}
-        new_room = daily_create_room(new_room_name, extra_properties=extra)
-        doc.daily_room_name = new_room.get("name") or new_room_name
-        doc.daily_room_url  = new_room.get("url")
-        doc.save(ignore_permissions=True)
-        room_url = doc.daily_room_url
-
-    # Create Daily token
-    token = daily_create_meeting_token(
-        room_name=doc.daily_room_name,
-        is_owner=(role == "practitioner"),
-        user_id=token_user_id,
-    )
-
-    # Increment participant count (used for both-parties detection)
-    current_count = int(getattr(doc, "participant_count", 0) or 0) + 1
-    doc.db_set("participant_count", current_count, update_modified=False)
-
-    # Mark session Waiting → Active when BOTH parties have joined
-    if doc.status in ("Draft", "Scheduled", "Waiting"):
-        doc.status = "Waiting"
-        if not doc.get("started_at"):
-            doc.db_set("started_at", now, update_modified=False)
-        doc.db_set("status", "Waiting", update_modified=False)
-        doc.save(ignore_permissions=True)
-
-    # both_joined_at is set by participant_joined API when count reaches 2
-    frappe.db.commit()
-
-    mode = getattr(doc, "consultation_mode", "Video") or "Video"
-    dur  = int(getattr(doc, "duration_minutes", DEFAULT_APPT_DURATION_MINUTES) or DEFAULT_APPT_DURATION_MINUTES)
-
-    return {
-        "session_id":         doc.name,
-        "room_name":          doc.daily_room_name,
-        "room_url":           room_url,
-        "token":              token,
-        "role":               role,
-        "practitioner":       doc.practitioner,
-        "display_name":       display_name,
-        "patient_user":       doc.patient_user,
-        "consultation_mode":  mode,
-        "duration_minutes":   dur,
-        "extensions_count":   int(getattr(doc, "extensions_count", 0) or 0),
-        "status":             doc.status,
-        "both_joined_at":     str(doc.get("both_joined_at") or ""),
-        "appointment":        doc.get("appointment") or "",
-    }
-
-
-# ─── participant auth helper ─────────────────────────────────────────────────
-
-def _verify_session_participant(doc, k=None):
-    """
-    Verifies the caller is the practitioner, the patient, or a guest with a
-    valid (unexpired) magic-link join key. Raises PermissionError otherwise.
-    """
-    current_user = frappe.session.user
-    is_guest     = current_user == "Guest"
-
-    if not is_guest:
-        practitioner_user = _get_practitioner_user(doc.practitioner) if doc.practitioner else None
-        if current_user == practitioner_user:
-            return
-        if doc.patient_user and doc.patient_user == current_user:
-            return
-        # Allow System Managers (admin monitoring)
-        if "System Manager" in frappe.get_roles(current_user):
-            return
-        frappe.throw(_("Not permitted"), frappe.PermissionError)
-
-    # Guest path — must supply a valid, unexpired join key
-    if not doc.get("allow_magic_link"):
-        frappe.throw(_("Login required"), frappe.PermissionError)
-    if not k or not doc.patient_join_key:
-        frappe.throw(_("Login required"), frappe.PermissionError)
-    if k != doc.patient_join_key:
-        frappe.throw(_("Invalid join key"), frappe.PermissionError)
-    if _is_expired(doc.patient_join_key_expires_at):
-        frappe.throw(_("Join link expired"), frappe.PermissionError)
-
-
-# ─── participant_joined ──────────────────────────────────────────────────────
-
-@frappe.whitelist(allow_guest=True, methods=["POST"])
-def participant_joined(session_id, k=None):
-    """
-    Called by the frontend when Daily.co fires 'participant-joined'.
-    When participant count reaches 2, marks both_joined_at and status=Active.
-    Returns the server timestamp so both clients can sync the timer.
-    Requires caller to be the session practitioner, patient, or a guest with a
-    valid magic-link join key (k).
-    """
-    if not session_id:
-        frappe.throw("Missing session id")
-
-    doc = frappe.get_doc(SESSION_DTYPE, session_id, ignore_permissions=True)
-    _verify_session_participant(doc, k)
-    count = int(getattr(doc, "participant_count", 0) or 0)
-
-    # Count the new participant
-    count += 1
-    doc.db_set("participant_count", count, update_modified=False)
-
-    both_joined_at = doc.get("both_joined_at")
-    if count >= 2 and not both_joined_at:
-        both_joined_at = now_datetime()
-        doc.db_set("both_joined_at", both_joined_at, update_modified=False)
-        doc.db_set("status", "Active", update_modified=False)
-
-    frappe.db.commit()
-
-    return {
-        "participant_count": count,
-        "both_joined_at":    str(both_joined_at or ""),
-        "status":            "Active" if count >= 2 else "Waiting",
-    }
-
-
-# ─── participant_left ────────────────────────────────────────────────────────
-
-@frappe.whitelist(allow_guest=True, methods=["POST"])
-def participant_left(session_id, k=None):
-    """Called when a participant leaves — decrements count."""
-    if not session_id:
-        return
-    doc = frappe.get_doc(SESSION_DTYPE, session_id, ignore_permissions=True)
-    _verify_session_participant(doc, k)
-    count = max(0, int(getattr(doc, "participant_count", 0) or 0) - 1)
-    doc.db_set("participant_count", count, update_modified=False)
-    frappe.db.commit()
-    return {"participant_count": count}
-
-
-# ─── extend_session ─────────────────────────────────────────────────────────
-
-@frappe.whitelist(methods=["POST"])
-def extend_session(session_id, extend_minutes):
-    """
-    Patient-initiated session extension with 20% discount.
-    Deducts from patient wallet immediately.
-    """
-    _require_login()
-
-    if not session_id:
-        frappe.throw("Missing session id")
-
-    extend_minutes = int(extend_minutes or 0)
-    if extend_minutes not in (15, 30):
-        frappe.throw("Extension must be 15 or 30 minutes", frappe.ValidationError)
-
-    doc = frappe.get_doc(SESSION_DTYPE, session_id, ignore_permissions=True)
-
-    # Only the patient on this session may extend
-    if doc.patient_user != frappe.session.user:
-        frappe.throw(_("Not permitted"), frappe.PermissionError)
-
-    if doc.status != "Active":
-        frappe.throw("Session is not active")
-
-    # Calculate discounted extension fee
-    appt_type = None
-    if doc.get("appointment"):
-        appt_type = frappe.db.get_value("Patient Appointment", doc.appointment, "appointment_type")
-
-    per_min = _get_fee_per_minute(appt_type, getattr(doc, "consultation_mode", "Video"))
-    gross_fee = round(per_min * extend_minutes, 2)
-    discount  = round(gross_fee * EXTENSION_DISCOUNT_PCT / 100, 2)
-    ext_fee   = round(gross_fee - discount, 2)
-
-    # Check wallet balance — stored on Patient.custom_wallet_balance
-    patient_name = doc.patient or frappe.db.get_value("Patient", {"user_id": frappe.session.user}, "name")
-    if not patient_name:
-        frappe.throw("Patient record not found")
-
-    from frappe.utils import flt
-    wallet_balance = flt(frappe.db.get_value("Patient", patient_name, "custom_wallet_balance") or 0)
-    if wallet_balance < ext_fee:
-        return {
-            "ok": False,
-            "error": "insufficient_balance",
-            "required": ext_fee,
-            "balance": wallet_balance,
-        }
-
-    # Atomic wallet deduction with row lock
-    try:
-        frappe.db.sql("SELECT name FROM `tabPatient` WHERE name = %s FOR UPDATE", patient_name)
-        current_bal = flt(frappe.db.get_value("Patient", patient_name, "custom_wallet_balance") or 0)
-        if current_bal < ext_fee:
-            return {"ok": False, "error": "insufficient_balance", "required": ext_fee, "balance": current_bal}
-        new_bal = current_bal - ext_fee
-        frappe.db.set_value("Patient", patient_name, "custom_wallet_balance", new_bal, update_modified=False)
-        frappe.db.commit()
-        # Record the transaction
-        try:
-            frappe.get_doc({
-                "doctype": "AirTook Wallet Transaction",
-                "patient": patient_name,
-                "transaction_type": "Deduction",
-                "amount": ext_fee,
-                "balance_before": current_bal,
-                "balance_after": new_bal,
-                "reference_doctype": "Video Consultation Session",
-                "reference_name": session_id,
-                "notes": f"Session extension {extend_minutes}min (20% discount)",
-                "created_by_user": frappe.session.user,
-            }).insert(ignore_permissions=True)
-            frappe.db.commit()
-        except Exception:
-            pass  # transaction log failure is non-fatal
-    except Exception as e:
-        frappe.log_error(frappe.get_traceback(), "extend_session wallet deduction failed")
-        frappe.throw(f"Payment failed: {str(e)}")
-
-    # Update session duration
-    new_duration = int(getattr(doc, "duration_minutes", DEFAULT_APPT_DURATION_MINUTES) or DEFAULT_APPT_DURATION_MINUTES) + extend_minutes
-    new_ext_count = int(getattr(doc, "extensions_count", 0) or 0) + 1
-    doc.db_set("duration_minutes", new_duration, update_modified=False)
-    doc.db_set("extensions_count", new_ext_count, update_modified=False)
-    frappe.db.commit()
-
-    return {
-        "ok": True,
-        "new_duration_minutes": new_duration,
-        "extension_fee": ext_fee,
-        "discount_applied": discount,
-        "extensions_count": new_ext_count,
-    }
-
-
-# ─── get_session_status ─────────────────────────────────────────────────────
+# ─── get_session_status ──────────────────────────────────────────────────────
 
 @frappe.whitelist(allow_guest=True, methods=["GET", "POST"])
 def get_session_status(session_id):
     if not session_id:
-        frappe.throw("Missing session id")
-    row = frappe.db.get_value(SESSION_DTYPE, session_id,
-        ["status", "participant_count", "both_joined_at", "duration_minutes", "extensions_count"],
-        as_dict=True)
+        frappe.throw("Missing session_id")
+    row = frappe.db.get_value(
+        SESSION_DTYPE, session_id,
+        ["status", "started_at", "duration_minutes", "extensions_count",
+         "appointment", "channel_name", "doctor_uid", "patient_uid"],
+        as_dict=True,
+    )
     if not row:
         frappe.throw("Session not found")
     return {
-        "session_id":        session_id,
-        "status":            row.status,
-        "participant_count": row.participant_count or 0,
-        "both_joined_at":    str(row.both_joined_at or ""),
-        "duration_minutes":  row.duration_minutes or DEFAULT_APPT_DURATION_MINUTES,
-        "extensions_count":  row.extensions_count or 0,
+        "session_id":       session_id,
+        "status":           row.status,
+        "started_at":       str(row.started_at or ""),
+        "duration_minutes": row.duration_minutes or DEFAULT_DURATION_MINUTES,
+        "extensions_count": row.extensions_count or 0,
+        "appointment":      row.appointment or "",
     }
+
+
+# ─── start_session_timer ─────────────────────────────────────────────────────
+
+@frappe.whitelist(methods=["POST"])
+def start_session_timer(session_id):
+    _require_login()
+    if not session_id:
+        frappe.throw("Missing session_id")
+
+    doc = frappe.get_doc(SESSION_DTYPE, session_id, ignore_permissions=True)
+    practitioner_user = _get_practitioner_user(doc.practitioner) if doc.practitioner else None
+    if practitioner_user and practitioner_user != frappe.session.user:
+        frappe.throw(_("Not permitted"), frappe.PermissionError)
+
+    if doc.status != "active":
+        now = now_datetime()
+        doc.db_set("status",     "active", update_modified=False)
+        doc.db_set("started_at", now,      update_modified=False)
+        frappe.db.commit()
+
+    frappe.publish_realtime(
+        event="video_session_started",
+        message={"session_id": session_id, "started_at": str(doc.started_at or now_datetime())},
+        room=f"video_{session_id}",
+    )
+    return {"session_id": session_id, "status": "active", "started_at": str(doc.started_at or "")}
 
 
 # ─── end_session ─────────────────────────────────────────────────────────────
 
 @frappe.whitelist(methods=["POST"])
-def end_session(session_id):
+def end_session(session_id, transcript=None):
     _require_login()
     if not session_id:
-        frappe.throw("Missing session id")
+        frappe.throw("Missing session_id")
 
     doc = frappe.get_doc(SESSION_DTYPE, session_id, ignore_permissions=True)
     practitioner_user = _get_practitioner_user(doc.practitioner) if doc.practitioner else None
     if not practitioner_user or practitioner_user != frappe.session.user:
         frappe.throw(_("Not permitted"), frappe.PermissionError)
 
-    # Row-lock the session before reading status to prevent concurrent end_session calls
-    # from both passing the check and double-crediting doctor earnings.
+    # Row-lock to prevent double end_session (concurrent calls from doctor + patient)
     frappe.db.sql(
-        "SELECT name FROM `tabVideo Consultation Session` WHERE name = %s FOR UPDATE",
+        "SELECT name FROM `tabAirTook Video Session` WHERE name = %s FOR UPDATE",
         session_id,
     )
-    # Re-read status from DB after acquiring the lock (doc was read before the lock).
-    if frappe.db.get_value(SESSION_DTYPE, session_id, "status") != "Ended":
-        doc.status = "Ended"
-        doc.db_set("ended_at", now_datetime(), update_modified=False)
-        doc.db_set("status", "Ended", update_modified=False)
-        doc.db_set("participant_count", 0, update_modified=False)
+
+    if frappe.db.get_value(SESSION_DTYPE, session_id, "status") != "completed":
+        now = now_datetime()
+        doc.db_set("status",   "completed", update_modified=False)
+        doc.db_set("ended_at", now,         update_modified=False)
+        if transcript:
+            doc.db_set("transcript", transcript, update_modified=False)
         doc.save(ignore_permissions=True)
-        # Update linked appointment
+
         if doc.get("appointment"):
             frappe.db.set_value("Patient Appointment", doc.appointment, "status", "Closed")
         frappe.db.commit()
 
-        # ── Credit doctor earnings NOW (after successful consultation) ────────
-        # Earnings are held until session ends so cancelled/no-show appointments
-        # do not generate doctor income.
+        # ── Credit doctor earnings ──────────────────────────────────────────
         if doc.get("practitioner") and doc.get("appointment"):
             try:
                 from frappe.utils import flt as _flt
                 appt = doc.appointment
-                # Determine fee and doctor percentage from appointment fields
                 paid_amount = _flt(
                     frappe.db.get_value("Patient Appointment", appt, "paid_amount") or 0
                 )
                 if paid_amount <= 0:
-                    # Try custom_payment_amount fallback
                     paid_amount = _flt(
                         frappe.db.get_value("Patient Appointment", appt, "custom_payment_amount") or 0
                     )
                 if paid_amount > 0:
-                    # Default 80% doctor share; try to get actual pct from AirTook Setting
                     commission_pct = 20.0
                     try:
                         cp = frappe.db.get_value(
@@ -635,7 +366,6 @@ def end_session(session_id):
                         pass
                     doctor_pct = 100.0 - commission_pct
                     doctor_cut = round(paid_amount * doctor_pct / 100, 2)
-
                     if doctor_cut > 0:
                         frappe.db.sql(
                             "SELECT name FROM `tabHealthcare Practitioner` WHERE name = %s FOR UPDATE",
@@ -655,15 +385,30 @@ def end_session(session_id):
                         frappe.db.commit()
                         frappe.logger().info(
                             f"end_session: credited ₦{doctor_cut} to {doc.practitioner} "
-                            f"for session {doc.name} (appointment {appt})"
+                            f"for session {doc.name}"
                         )
             except Exception:
                 frappe.log_error(
                     frappe.get_traceback(),
-                    f"end_session: doctor earnings credit failed for {doc.name}",
+                    f"end_session: earnings credit failed for {doc.name}",
                 )
 
-        # ── Trigger post-consultation summary email (best-effort, non-blocking) ─
+        # ── Save transcript to Patient Encounter ─────────────────────────────
+        if transcript and doc.get("appointment"):
+            try:
+                enc_name = frappe.db.get_value(
+                    "Patient Encounter", {"appointment": doc.appointment}, "name"
+                )
+                if enc_name and frappe.db.has_column("Patient Encounter", "custom_transcript"):
+                    frappe.db.set_value(
+                        "Patient Encounter", enc_name,
+                        "custom_transcript", transcript, update_modified=False,
+                    )
+                    frappe.db.commit()
+            except Exception:
+                pass
+
+        # ── Enqueue AI consultation summary ──────────────────────────────────
         if doc.get("appointment"):
             try:
                 import frappe.utils.background_jobs as _bj
@@ -676,10 +421,96 @@ def end_session(session_id):
             except Exception:
                 frappe.log_error(
                     frappe.get_traceback(),
-                    f"end_session: failed to enqueue consultation summary for {doc.name}",
+                    f"end_session: failed to enqueue summary for {doc.name}",
                 )
 
-    return {"session_id": doc.name, "status": "Ended"}
+    return {"session_id": doc.name, "status": "completed"}
+
+
+# ─── extend_session ─────────────────────────────────────────────────────────
+
+@frappe.whitelist(methods=["POST"])
+def extend_session(session_id, extend_minutes):
+    _require_login()
+    if not session_id:
+        frappe.throw("Missing session_id")
+
+    extend_minutes = int(extend_minutes or 0)
+    if extend_minutes not in (15, 30):
+        frappe.throw("Extension must be 15 or 30 minutes", frappe.ValidationError)
+
+    doc = frappe.get_doc(SESSION_DTYPE, session_id, ignore_permissions=True)
+
+    if doc.patient_user != frappe.session.user:
+        frappe.throw(_("Not permitted"), frappe.PermissionError)
+
+    if doc.status != "active":
+        frappe.throw("Session is not active")
+
+    appt_type = None
+    if doc.get("appointment"):
+        appt_type = frappe.db.get_value("Patient Appointment", doc.appointment, "appointment_type")
+
+    per_min   = _get_fee_per_minute(appt_type)
+    gross_fee = round(per_min * extend_minutes, 2)
+    discount  = round(gross_fee * EXTENSION_DISCOUNT_PCT / 100, 2)
+    ext_fee   = round(gross_fee - discount, 2)
+
+    patient_name = doc.patient or frappe.db.get_value(
+        "Patient", {"user_id": frappe.session.user}, "name"
+    )
+    if not patient_name:
+        frappe.throw("Patient record not found")
+
+    from frappe.utils import flt
+    wallet_balance = flt(frappe.db.get_value("Patient", patient_name, "custom_wallet_balance") or 0)
+    if wallet_balance < ext_fee:
+        return {
+            "ok": False, "error": "insufficient_balance",
+            "required": ext_fee, "balance": wallet_balance,
+        }
+
+    try:
+        frappe.db.sql("SELECT name FROM `tabPatient` WHERE name = %s FOR UPDATE", patient_name)
+        current_bal = flt(frappe.db.get_value("Patient", patient_name, "custom_wallet_balance") or 0)
+        if current_bal < ext_fee:
+            return {"ok": False, "error": "insufficient_balance", "required": ext_fee, "balance": current_bal}
+        new_bal = current_bal - ext_fee
+        frappe.db.set_value("Patient", patient_name, "custom_wallet_balance", new_bal, update_modified=False)
+        frappe.db.commit()
+        try:
+            frappe.get_doc({
+                "doctype": "AirTook Wallet Transaction",
+                "patient": patient_name,
+                "transaction_type": "Deduction",
+                "amount": ext_fee,
+                "balance_before": current_bal,
+                "balance_after": new_bal,
+                "reference_doctype": SESSION_DTYPE,
+                "reference_name": session_id,
+                "notes": f"Session extension {extend_minutes}min (20% discount)",
+                "created_by_user": frappe.session.user,
+            }).insert(ignore_permissions=True)
+            frappe.db.commit()
+        except Exception:
+            pass  # transaction log failure is non-fatal
+    except Exception as e:
+        frappe.log_error(frappe.get_traceback(), "extend_session wallet deduction failed")
+        frappe.throw(f"Payment failed: {str(e)}")
+
+    new_duration  = int(doc.duration_minutes or DEFAULT_DURATION_MINUTES) + extend_minutes
+    new_ext_count = int(getattr(doc, "extensions_count", 0) or 0) + 1
+    doc.db_set("duration_minutes",  new_duration,  update_modified=False)
+    doc.db_set("extensions_count",  new_ext_count, update_modified=False)
+    frappe.db.commit()
+
+    return {
+        "ok": True,
+        "new_duration_minutes": new_duration,
+        "extension_fee":        ext_fee,
+        "discount_applied":     discount,
+        "extensions_count":     new_ext_count,
+    }
 
 
 # ─── submit_rating ───────────────────────────────────────────────────────────
@@ -688,7 +519,7 @@ def end_session(session_id):
 def submit_rating(session_id, rating, comment=None, rated_by_role=None):
     _require_login()
     if not session_id:
-        frappe.throw("Missing session id")
+        frappe.throw("Missing session_id")
     try:
         rating = int(rating)
     except (TypeError, ValueError):
@@ -697,10 +528,10 @@ def submit_rating(session_id, rating, comment=None, rated_by_role=None):
         frappe.throw("Rating must be between 1 and 5", frappe.ValidationError)
 
     doc = frappe.get_doc(SESSION_DTYPE, session_id, ignore_permissions=True)
-    current_user = frappe.session.user
+    current_user      = frappe.session.user
     practitioner_user = _get_practitioner_user(doc.practitioner) if doc.practitioner else None
-    is_practitioner = bool(practitioner_user and practitioner_user == current_user)
-    is_patient = bool(doc.patient_user and doc.patient_user == current_user)
+    is_practitioner   = bool(practitioner_user and practitioner_user == current_user)
+    is_patient        = bool(doc.patient_user and doc.patient_user == current_user)
 
     if not is_practitioner and not is_patient:
         frappe.throw(_("Not permitted"), frappe.PermissionError)
@@ -725,46 +556,3 @@ def submit_rating(session_id, rating, comment=None, rated_by_role=None):
         frappe.db.commit()
 
     return {"session_id": session_id, "rating": rating}
-
-
-# ─── access window helpers ───────────────────────────────────────────────────
-
-def _get_appt_datetime_and_duration(patient_appointment):
-    appt = frappe.get_doc("Patient Appointment", patient_appointment)
-    start_date = getattr(appt, "appointment_date", None)
-    start_time = getattr(appt, "appointment_time", None)
-    duration   = getattr(appt, "duration", None) or DEFAULT_APPT_DURATION_MINUTES
-    if not start_date or not start_time:
-        return None, int(duration)
-    start_dt = frappe.utils.get_datetime(f"{start_date} {start_time}")
-    return start_dt, int(duration)
-
-def _compute_access_window(doc):
-    now = now_datetime()
-    if getattr(doc, "appointment", None):
-        start_dt, duration = _get_appt_datetime_and_duration(doc.appointment)
-        if start_dt:
-            open_from = add_to_date(start_dt, minutes=-JOIN_EARLY_MINUTES)
-            close_at  = add_to_date(start_dt, minutes=(duration + SESSION_EXPIRE_AFTER_MINUTES))
-            return open_from, close_at, "scheduled"
-    if getattr(doc, "ended_at", None):
-        open_from = add_to_date(doc.ended_at, minutes=-10000)
-        close_at  = add_to_date(doc.ended_at, minutes=SESSION_EXPIRE_AFTER_MINUTES)
-        return open_from, close_at, "quick"
-    return add_to_date(now, minutes=-10000), None, "quick"
-
-
-# ─── quick_consult ───────────────────────────────────────────────────────────
-
-@frappe.whitelist(methods=["GET", "POST"])
-def quick_consult(department=None, consultation_mode="Video", duration_minutes=30):
-    _require_login()
-    return create_session(
-        patient_appointment=None,
-        department=department,
-        practitioner=None,
-        patient_user=None,
-        allow_magic_link=1,
-        consultation_mode=consultation_mode,
-        duration_minutes=duration_minutes,
-    )
