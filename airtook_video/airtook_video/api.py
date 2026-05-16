@@ -46,10 +46,19 @@ def _generate_uid():
     return random.randint(100000, 999999)
 
 
+def _pack_string(s):
+    """Length-prefixed (uint16 LE) bytes packing used in Agora DynamicKey5."""
+    b = s if isinstance(s, bytes) else s.encode("utf-8")
+    return struct.pack("<H", len(b)) + b
+
+
 def _generate_agora_token_manual(app_id, app_certificate, channel_name, uid, role, expire_ts):
     """
     Agora AccessToken (DynamicKey5) HMAC-SHA256 implementation.
-    Matches the reference implementation at github.com/AgoraIO/Tools/DynamicKey/AgoraDynamicKey.
+    Reference: github.com/AgoraIO/Tools/DynamicKey/AgoraDynamicKey/python3
+    Token format: "006" + base64(content)
+    content = salt(4) + ts(4) + privileges_msg
+    signing  = app_id + uid_str + crc_chan(8 hex) + crc_uid(8 hex) + ts(10 dec) + salt(10 dec) + privileges_msg
     """
     ts   = int(time.time())
     salt = random.randint(1, 0x7FFFFFFF)
@@ -59,25 +68,39 @@ def _generate_agora_token_manual(app_id, app_certificate, channel_name, uid, rol
     if role == ROLE_PUBLISHER:
         privileges[2] = expire_ts  # publish audio
         privileges[3] = expire_ts  # publish video
-        privileges[4] = expire_ts  # publish data stream
+        privileges[4] = expire_ts  # data stream
 
+    # Pack privileges: uint16 count + (uint16 priv_id + uint32 expire) per entry
     msg = struct.pack("<H", len(privileges))
     for k in sorted(privileges.keys()):
         msg += struct.pack("<HI", k, privileges[k])
 
-    signing = (app_id + channel_name + uid_str).encode("utf-8") + msg
-    signature = hmac.new(app_certificate.encode("utf-8"), signing, hashlib.sha256).digest()
-
     crc_chan = zlib.crc32(channel_name.encode("utf-8")) & 0xFFFFFFFF
     crc_uid  = zlib.crc32(uid_str.encode("utf-8"))      & 0xFFFFFFFF
+
+    # Signing message per Agora DynamicKey5 reference
+    signing_str = (
+        app_id +
+        uid_str +
+        "%08x" % crc_chan +
+        "%08x" % crc_uid +
+        str(ts) +
+        str(salt) +
+        msg.hex()
+    )
+    signature = hmac.new(
+        app_certificate.encode("utf-8"),
+        signing_str.encode("utf-8"),
+        hashlib.sha256,
+    ).digest()
 
     content = (
         struct.pack("<I", salt) +
         struct.pack("<I", ts) +
-        struct.pack("<H", len(signature)) + signature +
+        _pack_string(signature) +
         struct.pack("<I", crc_chan) +
         struct.pack("<I", crc_uid) +
-        struct.pack("<H", len(msg)) + msg
+        _pack_string(msg)
     )
     return "006" + base64.b64encode(content).decode("utf-8")
 

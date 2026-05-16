@@ -366,14 +366,19 @@
 </style>
 
 {% if invalid %}
-<!-- Static error — no session_id in URL -->
+<!-- Static error — no session_id in URL, or Agora not configured -->
 <div id="vc-root">
   <div id="vc-error" class="active">
     <div class="error-icon-wrap">
       <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2"/><path d="M12 8V12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="16" r="1" fill="currentColor"/></svg>
     </div>
+    {% if creds_missing %}
+    <div class="error-title">Video Not Configured</div>
+    <div class="error-msg">Agora App ID is not set. Go to <strong>AirTook Configuration</strong> in the admin panel and add your Agora App ID and App Certificate to enable video consultations.</div>
+    {% else %}
     <div class="error-title">Invalid Session</div>
     <div class="error-msg">The consultation link is invalid or expired. Please check your message for the correct link.</div>
+    {% endif %}
   </div>
 </div>
 {% else %}
@@ -652,6 +657,36 @@
     return;
   }
 
+  // ── Agora error classifier ─────────────────────────────────────────────────
+  function classifyAgoraError(e) {
+    var msg = e && (e.message || e.toString() || "");
+    if (msg.indexOf("appid") !== -1 || msg.indexOf("vendor key") !== -1 ||
+        msg.indexOf("CAN_NOT_GET_GATEWAY_SERVER") !== -1) {
+      return {
+        title: "Video Service Not Configured",
+        body: "The video service App ID is invalid or has not been activated on Agora. " +
+              "Please contact support so the administrator can update the Agora credentials.",
+      };
+    }
+    if (msg.indexOf("PERMISSION_DENIED") !== -1 || msg.indexOf("NotAllowedError") !== -1) {
+      return {
+        title: "Camera/Microphone Blocked",
+        body: "Your browser blocked access to camera or microphone. " +
+              "Please allow access in your browser settings and refresh the page.",
+      };
+    }
+    if (msg.indexOf("token") !== -1 || msg.indexOf("TOKEN") !== -1) {
+      return {
+        title: "Session Expired",
+        body: "Your session token has expired. Please go back and rejoin the consultation.",
+      };
+    }
+    return {
+      title: "Connection Failed",
+      body: msg || "Unable to connect. Please refresh and try again.",
+    };
+  }
+
   // ── Remove ERPNext chrome ──────────────────────────────────────────────────
   document.addEventListener("DOMContentLoaded", function () {
     ["body > header","body > nav","body > .navbar","body > footer",
@@ -720,7 +755,8 @@
       showSection("vc-call");
       document.getElementById("waiting-overlay").classList.add("hidden");
     } catch (e) {
-      showError("Connection Failed", e && e.message ? e.message : "Unable to start consultation.");
+      var err = classifyAgoraError(e);
+      showError(err.title, err.body);
     }
   };
 
@@ -738,7 +774,8 @@
       document.getElementById("waiting-overlay").classList.remove("hidden");
       document.getElementById("preload-title").textContent = "Waiting for doctor…";
     } catch (e) {
-      showError("Connection Failed", e && e.message ? e.message : "Unable to join consultation.");
+      var err = classifyAgoraError(e);
+      showError(err.title, err.body);
     }
   }
 

@@ -1,1 +1,2 @@
 requests>=2.31.0
+agora-token-builder>=1.0.0
