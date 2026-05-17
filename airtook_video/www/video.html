@@ -364,6 +364,44 @@
     .btn-pc { width: 100%; justify-content: center; }
     #local-video { width: 90px; height: 68px; }
   }
+
+  /* ══════════ WHITEBOARD ══════════════════════════════════════════════════ */
+  body.wb-open #vc-call { width: calc(100vw - 420px) !important; }
+
+  #whiteboardPanel {
+    display: none;
+    position: fixed;
+    top: 0; right: 0;
+    width: 420px; height: 100vh;
+    background: #ffffff;
+    box-shadow: -4px 0 24px rgba(0,0,0,0.25);
+    z-index: 200;
+    flex-direction: column;
+    border-radius: 16px 0 0 16px;
+    overflow: hidden;
+    transform: translateX(100%);
+    transition: transform 0.3s cubic-bezier(0.4,0,0.2,1);
+  }
+  #wbThumbnail {
+    display: none;
+    position: fixed;
+    bottom: 80px; right: 16px;
+    width: 120px; height: 80px;
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+    cursor: pointer;
+    z-index: 201;
+    border: 2px solid #ff5c35;
+  }
+  .wb-tool { transition: background 0.15s, color 0.15s; }
+  .wb-color { transition: transform 0.15s, border-color 0.15s; border-radius: 50%; }
+  .wb-size  { transition: background 0.15s; }
+
+  @media (max-width: 600px) {
+    body.wb-open #vc-call { width: 100vw !important; }
+    #whiteboardPanel { width: 100vw !important; border-radius: 0 !important; }
+  }
 </style>
 
 {% if invalid %}
@@ -440,6 +478,97 @@
     <!-- Local video PIP -->
     <div id="local-video"></div>
 
+    <!-- Whiteboard Panel -->
+    <div id="whiteboardPanel">
+      <!-- Header -->
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px;background:#1a1a2e;color:#fff;flex-shrink:0;">
+        <div style="display:flex;align-items:center;gap:10px;">
+          <div id="wbSyncDot" style="width:8px;height:8px;border-radius:50%;background:#2ecc71;transition:background .3s;flex-shrink:0;"></div>
+          <span style="font-family:'Sora',sans-serif;font-weight:600;font-size:15px;">Whiteboard</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px;">
+          <div style="display:flex;align-items:center;gap:4px;font-size:12px;color:rgba(255,255,255,.6);">
+            <div style="width:7px;height:7px;border-radius:50%;background:#ff5c35;flex-shrink:0;"></div>
+            <span>Doctor</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:4px;font-size:12px;color:rgba(255,255,255,.6);margin-right:6px;">
+            <div style="width:7px;height:7px;border-radius:50%;background:#457B9D;flex-shrink:0;"></div>
+            <span>Patient</span>
+          </div>
+          <button title="Save as PNG" onclick="window._WB&&_WB._saveImage()" style="background:rgba(255,255,255,.12);border:none;color:#fff;padding:4px 10px;border-radius:7px;font-size:12px;cursor:pointer;">&#128190; Save</button>
+          <button title="Minimize" onclick="window._WB&&_WB._minimize()" style="background:rgba(255,255,255,.12);border:none;color:#fff;width:26px;height:26px;border-radius:7px;font-size:15px;cursor:pointer;line-height:1;">&#8722;</button>
+          <button title="Close whiteboard" onclick="window._WB&&_WB._close()" style="background:rgba(255,92,53,.3);border:none;color:#fff;width:26px;height:26px;border-radius:7px;font-size:15px;cursor:pointer;line-height:1;">&#215;</button>
+        </div>
+      </div>
+
+      <!-- Properties bar -->
+      <div style="display:flex;align-items:center;gap:8px;padding:7px 10px;background:#f8f9fa;border-bottom:1px solid #eee;flex-shrink:0;flex-wrap:wrap;">
+        <!-- Color swatches -->
+        <div style="display:flex;gap:5px;align-items:center;">
+          <div class="wb-color" data-color="#E63946" title="Medical Red"   style="width:20px;height:20px;background:#E63946;cursor:pointer;border:2px solid transparent;"></div>
+          <div class="wb-color" data-color="#F4A261" title="Warning Orange" style="width:20px;height:20px;background:#F4A261;cursor:pointer;border:2px solid transparent;"></div>
+          <div class="wb-color" data-color="#2A9D8F" title="Safe Green"    style="width:20px;height:20px;background:#2A9D8F;cursor:pointer;border:2px solid transparent;"></div>
+          <div class="wb-color" data-color="#457B9D" title="Body Blue"     style="width:20px;height:20px;background:#457B9D;cursor:pointer;border:2px solid transparent;"></div>
+          <div class="wb-color" data-color="#7B2D8B" title="Purple"        style="width:20px;height:20px;background:#7B2D8B;cursor:pointer;border:2px solid transparent;"></div>
+          <div class="wb-color" data-color="#1a1a2e" title="Black"         style="width:20px;height:20px;background:#1a1a2e;cursor:pointer;border:2px solid transparent;"></div>
+          <div class="wb-color" data-color="#ffffff" title="White"         style="width:20px;height:20px;background:#fff;cursor:pointer;border:2px solid #ccc;"></div>
+          <div class="wb-color" data-color="#ff5c35" title="Coral"         style="width:20px;height:20px;background:#ff5c35;cursor:pointer;border:2px solid transparent;"></div>
+          <input type="color" id="wbCustomColor" title="Custom color" style="width:20px;height:20px;border:none;border-radius:50%;cursor:pointer;padding:0;flex-shrink:0;">
+        </div>
+        <div style="width:1px;height:20px;background:#ddd;flex-shrink:0;"></div>
+        <!-- Stroke sizes -->
+        <div style="display:flex;gap:5px;align-items:center;">
+          <div class="wb-size" data-size="2" title="Thin" style="width:26px;height:26px;border-radius:6px;background:#f0f0f0;display:flex;align-items:center;justify-content:center;cursor:pointer;">
+            <div class="wb-size-dot" style="width:12px;height:2px;background:#333;border-radius:2px;"></div>
+          </div>
+          <div class="wb-size" data-size="5" title="Medium" style="width:26px;height:26px;border-radius:6px;background:#f0f0f0;display:flex;align-items:center;justify-content:center;cursor:pointer;">
+            <div class="wb-size-dot" style="width:12px;height:4px;background:#333;border-radius:2px;"></div>
+          </div>
+          <div class="wb-size" data-size="10" title="Thick" style="width:26px;height:26px;border-radius:6px;background:#f0f0f0;display:flex;align-items:center;justify-content:center;cursor:pointer;">
+            <div class="wb-size-dot" style="width:12px;height:8px;background:#333;border-radius:2px;"></div>
+          </div>
+        </div>
+        <div style="width:1px;height:20px;background:#ddd;flex-shrink:0;"></div>
+        <!-- Undo / Redo / Grid -->
+        <button id="wbUndoBtn" title="Undo (Ctrl+Z)" onclick="window._WB&&_WB._undo()" style="background:#f0f0f0;border:none;border-radius:6px;width:26px;height:26px;cursor:pointer;font-size:13px;">&#8617;</button>
+        <button id="wbRedoBtn" title="Redo (Ctrl+Y)" onclick="window._WB&&_WB._redo()" style="background:#f0f0f0;border:none;border-radius:6px;width:26px;height:26px;cursor:pointer;font-size:13px;">&#8618;</button>
+        <button id="wbGridBtn" title="Toggle grid"   onclick="window._WB&&_WB._toggleGrid()" style="background:#f0f0f0;border:none;border-radius:6px;width:26px;height:26px;cursor:pointer;font-size:12px;">&#8862;</button>
+      </div>
+
+      <!-- Main area: tools + canvas -->
+      <div style="display:flex;flex:1;overflow:hidden;">
+
+        <!-- Tools sidebar -->
+        <div style="width:46px;background:#f8f9fa;border-right:1px solid #eee;display:flex;flex-direction:column;align-items:center;padding:8px 0;gap:3px;flex-shrink:0;">
+          <button class="wb-tool" data-tool="pen"         title="Pen"         style="width:34px;height:34px;border:none;border-radius:8px;background:#ff5c35;color:#fff;font-size:15px;cursor:pointer;">&#9999;&#65039;</button>
+          <button class="wb-tool" data-tool="highlighter" title="Highlighter" style="width:34px;height:34px;border:none;border-radius:8px;background:transparent;font-size:15px;cursor:pointer;">&#128397;&#65039;</button>
+          <button class="wb-tool" data-tool="line"        title="Line"        style="width:34px;height:34px;border:none;border-radius:8px;background:transparent;font-size:17px;cursor:pointer;font-weight:bold;">&#9585;</button>
+          <button class="wb-tool" data-tool="arrow"       title="Arrow"       style="width:34px;height:34px;border:none;border-radius:8px;background:transparent;font-size:15px;cursor:pointer;">&#10145;&#65039;</button>
+          <button class="wb-tool" data-tool="rect"        title="Rectangle"   style="width:34px;height:34px;border:none;border-radius:8px;background:transparent;font-size:15px;cursor:pointer;">&#9645;</button>
+          <button class="wb-tool" data-tool="circle"      title="Ellipse"     style="width:34px;height:34px;border:none;border-radius:8px;background:transparent;font-size:15px;cursor:pointer;">&#11093;</button>
+          <button class="wb-tool" data-tool="text"        title="Text label"  style="width:34px;height:34px;border:none;border-radius:8px;background:transparent;font-size:14px;font-weight:700;cursor:pointer;color:#333;">T</button>
+          <button class="wb-tool" data-tool="body"        title="Body diagram" style="width:34px;height:34px;border:none;border-radius:8px;background:transparent;font-size:14px;cursor:pointer;">&#129776;</button>
+          <div style="width:26px;height:1px;background:#ddd;margin:3px 0;"></div>
+          <button class="wb-tool" data-tool="eraser"      title="Eraser"      style="width:34px;height:34px;border:none;border-radius:8px;background:transparent;font-size:15px;cursor:pointer;">&#129529;</button>
+          <button id="wbClearBtn" title="Clear all (tap twice)" onclick="window._WB&&_WB._confirmClear()" style="width:34px;height:34px;border:none;border-radius:8px;background:transparent;font-size:15px;cursor:pointer;color:#E63946;">&#128465;&#65039;</button>
+        </div>
+
+        <!-- Canvas container -->
+        <div id="wbCanvasContainer" style="flex:1;position:relative;overflow:hidden;background:#fff;">
+          <canvas id="wbGridCanvas" style="position:absolute;top:0;left:0;pointer-events:none;opacity:0.15;"></canvas>
+          <canvas id="wbCanvas"     style="position:absolute;top:0;left:0;touch-action:none;cursor:crosshair;"></canvas>
+          <input id="wbTextInput" type="text" placeholder="Type label…"
+            style="display:none;position:absolute;background:transparent;border:none;border-bottom:2px solid #ff5c35;outline:none;font-family:'DM Sans',sans-serif;padding:2px 4px;min-width:80px;z-index:10;">
+        </div>
+      </div>
+    </div>
+
+    <!-- Whiteboard minimized thumbnail -->
+    <div id="wbThumbnail" onclick="window._WB&&_WB._restore()" title="Tap to restore whiteboard">
+      <canvas id="wbThumbCanvas" style="width:100%;height:100%;display:block;"></canvas>
+      <div style="position:absolute;bottom:0;left:0;right:0;text-align:center;font-size:10px;color:#fff;background:rgba(0,0,0,0.55);padding:2px;">Tap to restore</div>
+    </div>
+
     <!-- Controls -->
     <div id="call-controls">
       <div class="ctrl-group">
@@ -470,6 +599,13 @@
           <svg viewBox="0 0 24 24" fill="none"><path d="M3 5h12M9 3v2M5 9c.5 2.5 2.5 4 4.5 4s4-1.5 4.5-4M21 21l-4.35-4.35M17 11l-6-6m6 6l-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </button>
         <span class="ctrl-label" id="lbl-trans">Translate</span>
+      </div>
+
+      <div class="ctrl-group">
+        <button class="ctrl-btn on" id="wbToggleBtn" onclick="window._WB&&_WB._toggle()" title="Toggle Whiteboard">
+          <svg viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="18" height="14" rx="2" stroke="currentColor" stroke-width="2"/><path d="M7 17l2-4 3 3 3-5 2 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M8 21h8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        </button>
+        <span class="ctrl-label">Board</span>
       </div>
 
       <div class="ctrl-group">
@@ -864,6 +1000,7 @@
   window.executeEnd = async function () {
     if (_sessionEnded) return;
     _stopTranslation();
+    if (window._WB) _WB._onCallEnd();
     _sessionEnded = true;
     document.getElementById("btn-confirm-end-yes").disabled = true;
     document.getElementById("btn-confirm-end-yes").textContent = "Ending…";
@@ -1071,6 +1208,505 @@
       }
     })();
   }
+
+  // ── Whiteboard Engine ─────────────────────────────────────────────────────
+  (function() {
+    var _WB = window._WB = {};
+    var _tool = "pen";
+    var _color = ROLE === "doctor" ? "#ff5c35" : "#457B9D";
+    var _size = 5;
+    var _isDrawing = false;
+    var _startX = 0, _startY = 0, _lastX = 0, _lastY = 0;
+    var _currentPath = [];
+    var _previewSnapshot = null;
+    var _undoStack = [];
+    var _redoStack = [];
+    var _isOpen = false;
+    var _isMinimized = false;
+    var _showGrid = false;
+    var _canvas = null, _ctx = null;
+    var _gridCanvas = null, _gridCtx = null;
+    var _autoSaveTimer = null;
+    var _clearPending = false;
+    var _clearTimer = null;
+    var _shapeTools = { line: 1, arrow: 1, rect: 1, circle: 1 };
+    var _freeTools  = { pen: 1, highlighter: 1, eraser: 1 };
+
+    function _getCoords(e) {
+      if (e.touches && e.touches.length) {
+        var r = _canvas.getBoundingClientRect();
+        return { x: e.touches[0].clientX - r.left, y: e.touches[0].clientY - r.top };
+      }
+      return { x: e.offsetX, y: e.offsetY };
+    }
+
+    function _init() {
+      _canvas = document.getElementById("wbCanvas");
+      if (!_canvas) return;
+      _ctx = _canvas.getContext("2d");
+      _gridCanvas = document.getElementById("wbGridCanvas");
+      _gridCtx = _gridCanvas.getContext("2d");
+      _resizeCanvas();
+      window.addEventListener("resize", _resizeCanvas);
+
+      document.querySelectorAll(".wb-color").forEach(function(el) {
+        el.addEventListener("click", function() { _WB._setColor(this.dataset.color, this); });
+      });
+      document.querySelectorAll(".wb-size").forEach(function(el) {
+        el.addEventListener("click", function() {
+          _size = parseInt(this.dataset.size, 10);
+          document.querySelectorAll(".wb-size").forEach(function(s) {
+            s.style.background = "#f0f0f0";
+            var d = s.querySelector(".wb-size-dot");
+            if (d) d.style.background = "#333";
+          });
+          this.style.background = "#ff5c35";
+          var d = this.querySelector(".wb-size-dot");
+          if (d) d.style.background = "#fff";
+        });
+      });
+      document.querySelectorAll(".wb-tool").forEach(function(el) {
+        el.addEventListener("click", function() { _selectTool(this.dataset.tool); });
+      });
+
+      _canvas.addEventListener("mousedown", _onDown);
+      _canvas.addEventListener("mousemove", _onMove);
+      _canvas.addEventListener("mouseup",   _onUp);
+      _canvas.addEventListener("mouseleave", _onUp);
+      _canvas.addEventListener("touchstart", function(e) { e.preventDefault(); _onDown(e); }, { passive: false });
+      _canvas.addEventListener("touchmove",  function(e) { e.preventDefault(); _onMove(e); }, { passive: false });
+      _canvas.addEventListener("touchend",   function(e) { e.preventDefault(); _onUp(e);   }, { passive: false });
+
+      document.addEventListener("keydown", function(e) {
+        if (!_isOpen) return;
+        if ((e.ctrlKey || e.metaKey) && e.key === "z" && !e.shiftKey) { e.preventDefault(); _WB._undo(); }
+        if ((e.ctrlKey || e.metaKey) && (e.key === "y" || (e.shiftKey && e.key === "z"))) { e.preventDefault(); _WB._redo(); }
+      });
+
+      var ti = document.getElementById("wbTextInput");
+      if (ti) {
+        ti.addEventListener("keydown", function(e) {
+          if (e.key === "Enter") { e.preventDefault(); _commitText(); }
+          if (e.key === "Escape") { this.style.display = "none"; }
+        });
+        ti.addEventListener("blur", _commitText);
+      }
+      var cc = document.getElementById("wbCustomColor");
+      if (cc) cc.addEventListener("change", function() { _WB._setColor(this.value, null); });
+
+      var initSwatch = document.querySelector(".wb-color[data-color=\"" + _color + "\"]");
+      if (initSwatch) _highlightSwatch(initSwatch);
+      var initSize = document.querySelector(".wb-size[data-size=\"5\"]");
+      if (initSize) {
+        initSize.style.background = "#ff5c35";
+        var id = initSize.querySelector(".wb-size-dot");
+        if (id) id.style.background = "#fff";
+      }
+
+      _autoSaveTimer = setInterval(function() {
+        if (!_canvas) return;
+        try { sessionStorage.setItem("wb_state", _canvas.toDataURL()); } catch(e) {}
+      }, 30000);
+      _restoreSession();
+
+      (function _setupWbRt() {
+        if (window.frappe && window.frappe.realtime && window.frappe.realtime.on) {
+          frappe.realtime.on("wb_stroke", function(msg) { _WB._handleRemote(msg); });
+        } else {
+          setTimeout(_setupWbRt, 600);
+        }
+      })();
+    }
+
+    function _resizeCanvas() {
+      if (!_canvas) return;
+      var cont = document.getElementById("wbCanvasContainer");
+      if (!cont) return;
+      var w = cont.offsetWidth, h = cont.offsetHeight;
+      var img = _ctx ? _ctx.getImageData(0, 0, _canvas.width, _canvas.height) : null;
+      _canvas.width = w; _canvas.height = h;
+      _gridCanvas.width = w; _gridCanvas.height = h;
+      if (img) _ctx.putImageData(img, 0, 0);
+      if (_showGrid) _drawGrid();
+    }
+
+    function _selectTool(tool) {
+      _tool = tool;
+      document.querySelectorAll(".wb-tool").forEach(function(b) { b.style.background = "transparent"; b.style.color = ""; });
+      var active = document.querySelector(".wb-tool[data-tool=\"" + tool + "\"]");
+      if (active) { active.style.background = "#ff5c35"; active.style.color = "#fff"; }
+      var cursors = { pen: "crosshair", highlighter: "crosshair", eraser: "cell", line: "crosshair", arrow: "crosshair", rect: "crosshair", circle: "crosshair", text: "text", body: "copy" };
+      if (_canvas) _canvas.style.cursor = cursors[tool] || "crosshair";
+      if (tool === "body") _insertBody();
+    }
+
+    function _onDown(e) {
+      if (e.type === "mousedown" && e.buttons !== 1) return;
+      var c = _getCoords(e);
+      _isDrawing = true;
+      _startX = _lastX = c.x; _startY = _lastY = c.y;
+      _currentPath = [{ x: c.x, y: c.y }];
+
+      if (_tool === "text") { _isDrawing = false; _showTextInput(c.x, c.y); return; }
+      if (_freeTools[_tool]) {
+        _saveUndo();
+        _ctx.save();
+        _ctx.beginPath(); _ctx.moveTo(c.x, c.y);
+        _ctx.lineCap = "round"; _ctx.lineJoin = "round";
+        _ctx.lineWidth = _tool === "eraser" ? _size * 3 : _size;
+        _ctx.strokeStyle = _tool === "eraser" ? "#ffffff" : _color;
+        _ctx.globalAlpha = _tool === "highlighter" ? 0.35 : 1;
+        _ctx.restore();
+      } else if (_shapeTools[_tool]) {
+        _previewSnapshot = _ctx.getImageData(0, 0, _canvas.width, _canvas.height);
+      }
+    }
+
+    function _onMove(e) {
+      if (!_isDrawing) return;
+      var c = _getCoords(e);
+      if (_freeTools[_tool]) {
+        _ctx.save();
+        _ctx.beginPath(); _ctx.moveTo(_lastX, _lastY); _ctx.lineTo(c.x, c.y);
+        _ctx.lineCap = "round"; _ctx.lineJoin = "round";
+        _ctx.lineWidth = _tool === "eraser" ? _size * 3 : _size;
+        _ctx.strokeStyle = _tool === "eraser" ? "#ffffff" : _color;
+        _ctx.globalAlpha = _tool === "highlighter" ? 0.35 : 1;
+        _ctx.stroke(); _ctx.restore();
+        _currentPath.push({ x: c.x, y: c.y });
+      } else if (_shapeTools[_tool] && _previewSnapshot) {
+        _ctx.putImageData(_previewSnapshot, 0, 0);
+        _ctx.save(); _ctx.setLineDash([6, 4]);
+        _drawShapeTo(_tool, _startX, _startY, c.x, c.y, _color, _size, _ctx);
+        _ctx.setLineDash([]); _ctx.restore();
+      }
+      _lastX = c.x; _lastY = c.y;
+    }
+
+    function _onUp(e) {
+      if (!_isDrawing) return;
+      _isDrawing = false;
+      if (_freeTools[_tool]) {
+        _ctx.globalAlpha = 1;
+        if (_currentPath.length >= 2) {
+          _sendStroke({ type: "path", points: _currentPath, color: _color, size: _size, tool: _tool });
+        }
+      } else if (_shapeTools[_tool] && _previewSnapshot) {
+        _undoStack.push(_previewSnapshot);
+        if (_undoStack.length > 50) _undoStack.shift();
+        _redoStack = [];
+        _ctx.putImageData(_previewSnapshot, 0, 0);
+        _drawShapeTo(_tool, _startX, _startY, _lastX, _lastY, _color, _size, _ctx);
+        _sendStroke({ type: "shape", tool: _tool, x1: _startX, y1: _startY, x2: _lastX, y2: _lastY, color: _color, size: _size });
+        _previewSnapshot = null;
+      }
+      _updateThumb();
+    }
+
+    function _drawShapeTo(tool, x1, y1, x2, y2, color, size, ctx) {
+      ctx.save();
+      ctx.strokeStyle = color; ctx.lineWidth = size; ctx.lineCap = "round"; ctx.globalAlpha = 1;
+      ctx.beginPath();
+      if (tool === "line") {
+        ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+      } else if (tool === "arrow") {
+        var ang = Math.atan2(y2 - y1, x2 - x1);
+        var hl = Math.max(12, size * 3);
+        ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(x2, y2); ctx.lineTo(x2 - hl * Math.cos(ang - Math.PI / 6), y2 - hl * Math.sin(ang - Math.PI / 6));
+        ctx.moveTo(x2, y2); ctx.lineTo(x2 - hl * Math.cos(ang + Math.PI / 6), y2 - hl * Math.sin(ang + Math.PI / 6));
+        ctx.stroke();
+      } else if (tool === "rect") {
+        ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
+      } else if (tool === "circle") {
+        var rx = Math.abs(x2 - x1) / 2, ry = Math.abs(y2 - y1) / 2;
+        ctx.ellipse(x1 + (x2 - x1) / 2, y1 + (y2 - y1) / 2, Math.max(rx, 1), Math.max(ry, 1), 0, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    function _showTextInput(x, y) {
+      var ti = document.getElementById("wbTextInput");
+      if (!ti) return;
+      ti.style.display = "block";
+      ti.style.left = x + "px"; ti.style.top = (y - 18) + "px";
+      ti.style.color = _color; ti.style.fontSize = Math.max(12, _size * 2) + "px";
+      ti.value = ""; ti._wx = x; ti._wy = y;
+      ti.focus();
+    }
+
+    function _commitText() {
+      var ti = document.getElementById("wbTextInput");
+      if (!ti || ti.style.display === "none") return;
+      ti.style.display = "none";
+      var text = (ti.value || "").trim();
+      if (!text) return;
+      _saveUndo();
+      var fs = Math.max(12, _size * 2);
+      _ctx.save();
+      _ctx.font = "bold " + fs + "px -apple-system, \"DM Sans\", sans-serif";
+      _ctx.fillStyle = _color;
+      _ctx.fillText(text, ti._wx, ti._wy);
+      _ctx.restore();
+      _sendStroke({ type: "text", text: text, x: ti._wx, y: ti._wy, color: _color, size: _size });
+      _updateThumb();
+    }
+
+    function _insertBody() {
+      _saveUndo();
+      var cx = _canvas.width / 2, cy = _canvas.height / 2;
+      var sc = Math.min(_canvas.width, _canvas.height) / 400;
+      _ctx.save();
+      _ctx.strokeStyle = "#457B9D"; _ctx.lineWidth = Math.max(1.5, sc * 2); _ctx.lineCap = "round";
+      _ctx.beginPath(); _ctx.ellipse(cx, cy - 120 * sc, 25 * sc, 30 * sc, 0, 0, Math.PI * 2); _ctx.stroke();
+      _ctx.beginPath(); _ctx.rect(cx - 35 * sc, cy - 75 * sc, 70 * sc, 90 * sc); _ctx.stroke();
+      _ctx.beginPath();
+      _ctx.moveTo(cx - 35 * sc, cy - 70 * sc); _ctx.lineTo(cx - 65 * sc, cy - 20 * sc); _ctx.lineTo(cx - 70 * sc, cy + 20 * sc);
+      _ctx.moveTo(cx + 35 * sc, cy - 70 * sc); _ctx.lineTo(cx + 65 * sc, cy - 20 * sc); _ctx.lineTo(cx + 70 * sc, cy + 20 * sc);
+      _ctx.stroke();
+      _ctx.beginPath();
+      _ctx.moveTo(cx - 20 * sc, cy + 15 * sc); _ctx.lineTo(cx - 25 * sc, cy + 80 * sc); _ctx.lineTo(cx - 28 * sc, cy + 130 * sc);
+      _ctx.moveTo(cx + 20 * sc, cy + 15 * sc); _ctx.lineTo(cx + 25 * sc, cy + 80 * sc); _ctx.lineTo(cx + 28 * sc, cy + 130 * sc);
+      _ctx.stroke();
+      _ctx.font = Math.max(9, 11 * sc) + "px -apple-system, sans-serif";
+      _ctx.fillStyle = "#457B9D"; _ctx.textAlign = "center";
+      _ctx.fillText("Tap to mark pain location", cx, cy + 155 * sc);
+      _ctx.textAlign = "left"; _ctx.restore();
+      _sendStroke({ type: "body", cx: cx, cy: cy, sc: sc });
+      _selectTool("pen");
+      _updateThumb();
+    }
+
+    function _saveUndo() {
+      if (!_ctx) return;
+      _undoStack.push(_ctx.getImageData(0, 0, _canvas.width, _canvas.height));
+      if (_undoStack.length > 50) _undoStack.shift();
+      _redoStack = [];
+    }
+
+    _WB._undo = function() {
+      if (!_undoStack.length || !_ctx) return;
+      _redoStack.push(_ctx.getImageData(0, 0, _canvas.width, _canvas.height));
+      _ctx.putImageData(_undoStack.pop(), 0, 0);
+      _updateThumb();
+    };
+
+    _WB._redo = function() {
+      if (!_redoStack.length || !_ctx) return;
+      _undoStack.push(_ctx.getImageData(0, 0, _canvas.width, _canvas.height));
+      _ctx.putImageData(_redoStack.pop(), 0, 0);
+      _updateThumb();
+    };
+
+    _WB._toggleGrid = function() {
+      _showGrid = !_showGrid;
+      var btn = document.getElementById("wbGridBtn");
+      if (_showGrid) {
+        _drawGrid();
+        if (btn) btn.style.background = "#457B9D";
+      } else {
+        if (_gridCtx) _gridCtx.clearRect(0, 0, _gridCanvas.width, _gridCanvas.height);
+        if (btn) btn.style.background = "#f0f0f0";
+      }
+    };
+
+    function _drawGrid() {
+      if (!_gridCtx) return;
+      _gridCtx.clearRect(0, 0, _gridCanvas.width, _gridCanvas.height);
+      _gridCtx.strokeStyle = "#457B9D"; _gridCtx.lineWidth = 0.5;
+      var sp = 30;
+      for (var x = 0; x <= _gridCanvas.width; x += sp) { _gridCtx.beginPath(); _gridCtx.moveTo(x, 0); _gridCtx.lineTo(x, _gridCanvas.height); _gridCtx.stroke(); }
+      for (var y = 0; y <= _gridCanvas.height; y += sp) { _gridCtx.beginPath(); _gridCtx.moveTo(0, y); _gridCtx.lineTo(_gridCanvas.width, y); _gridCtx.stroke(); }
+    }
+
+    _WB._confirmClear = function() {
+      var btn = document.getElementById("wbClearBtn");
+      if (_clearPending) {
+        clearTimeout(_clearTimer); _clearPending = false;
+        if (btn) { btn.style.color = "#E63946"; btn.style.background = "transparent"; }
+        _saveUndo();
+        _ctx.clearRect(0, 0, _canvas.width, _canvas.height);
+        _sendStroke({ type: "clear" });
+        _updateThumb();
+      } else {
+        _clearPending = true;
+        if (btn) { btn.style.color = "#fff"; btn.style.background = "#E63946"; }
+        _clearTimer = setTimeout(function() {
+          _clearPending = false;
+          if (btn) { btn.style.color = "#E63946"; btn.style.background = "transparent"; }
+        }, 2500);
+      }
+    };
+
+    _WB._saveImage = function() {
+      if (!_canvas) return;
+      var link = document.createElement("a");
+      link.download = "airtook-whiteboard-" + new Date().toISOString().slice(0, 10) + ".png";
+      link.href = _canvas.toDataURL("image/png");
+      link.click();
+    };
+
+    _WB._setColor = function(c, swatchEl) {
+      _color = c;
+      _highlightSwatch(swatchEl);
+    };
+
+    function _highlightSwatch(el) {
+      document.querySelectorAll(".wb-color").forEach(function(s) {
+        s.style.border = "2px solid transparent"; s.style.transform = "scale(1)";
+      });
+      if (el) { el.style.border = "2px solid #1a1a2e"; el.style.transform = "scale(1.25)"; }
+    }
+
+    function _updateThumb() {
+      var tc = document.getElementById("wbThumbCanvas");
+      if (!tc || !_canvas) return;
+      tc.width = 120; tc.height = 80;
+      tc.getContext("2d").drawImage(_canvas, 0, 0, 120, 80);
+    }
+
+    function _restoreSession() {
+      try {
+        var saved = sessionStorage.getItem("wb_state");
+        if (!saved) return;
+        var img = new Image();
+        img.onload = function() { if (_ctx) _ctx.drawImage(img, 0, 0); };
+        img.src = saved;
+      } catch(e) {}
+    }
+
+    function _sendStroke(data) {
+      frappe.call({
+        method: "airtook_video.airtook_video.api.relay_whiteboard_stroke",
+        args: { session_id: SESSION_ID, stroke_data: JSON.stringify(data) },
+        callback: function() {
+          var dot = document.getElementById("wbSyncDot");
+          if (dot) { dot.style.background = "#f39c12"; setTimeout(function() { if (dot) dot.style.background = "#2ecc71"; }, 500); }
+        },
+        error: function() {},
+      });
+    }
+
+    _WB._handleRemote = function(msg) {
+      if (!_canvas || !_ctx) return;
+      var d = msg.stroke;
+      if (!d) return;
+      var remColor = msg.sender === "doctor" ? "#ff5c35" : "#457B9D";
+      _ctx.save();
+      if (d.type === "path") {
+        var pts = d.points || [];
+        if (pts.length < 2) { _ctx.restore(); return; }
+        _ctx.beginPath(); _ctx.moveTo(pts[0].x, pts[0].y);
+        _ctx.lineCap = "round"; _ctx.lineJoin = "round";
+        _ctx.lineWidth = d.tool === "eraser" ? (d.size || 5) * 3 : (d.size || 5);
+        _ctx.strokeStyle = d.tool === "eraser" ? "#ffffff" : remColor;
+        _ctx.globalAlpha = d.tool === "highlighter" ? 0.35 : 1;
+        for (var i = 1; i < pts.length; i++) { _ctx.lineTo(pts[i].x, pts[i].y); }
+        _ctx.stroke();
+      } else if (d.type === "shape") {
+        _ctx.restore();
+        _drawShapeTo(d.tool, d.x1, d.y1, d.x2, d.y2, remColor, d.size || 3, _ctx);
+        _updateThumb();
+        var dot2 = document.getElementById("wbSyncDot");
+        if (dot2) { dot2.style.background = "#f39c12"; setTimeout(function() { if (dot2) dot2.style.background = "#2ecc71"; }, 400); }
+        return;
+      } else if (d.type === "text") {
+        var fs = Math.max(12, (d.size || 5) * 2);
+        _ctx.font = "bold " + fs + "px -apple-system, \"DM Sans\", sans-serif";
+        _ctx.fillStyle = remColor;
+        _ctx.fillText(d.text || "", d.x || 0, d.y || 0);
+      } else if (d.type === "body") {
+        var cx = d.cx, cy = d.cy, sc = d.sc;
+        _ctx.strokeStyle = remColor; _ctx.lineWidth = Math.max(1.5, sc * 2); _ctx.lineCap = "round";
+        _ctx.beginPath(); _ctx.ellipse(cx, cy - 120 * sc, 25 * sc, 30 * sc, 0, 0, Math.PI * 2); _ctx.stroke();
+        _ctx.beginPath(); _ctx.rect(cx - 35 * sc, cy - 75 * sc, 70 * sc, 90 * sc); _ctx.stroke();
+        _ctx.beginPath();
+        _ctx.moveTo(cx - 35 * sc, cy - 70 * sc); _ctx.lineTo(cx - 65 * sc, cy - 20 * sc); _ctx.lineTo(cx - 70 * sc, cy + 20 * sc);
+        _ctx.moveTo(cx + 35 * sc, cy - 70 * sc); _ctx.lineTo(cx + 65 * sc, cy - 20 * sc); _ctx.lineTo(cx + 70 * sc, cy + 20 * sc);
+        _ctx.stroke();
+        _ctx.beginPath();
+        _ctx.moveTo(cx - 20 * sc, cy + 15 * sc); _ctx.lineTo(cx - 25 * sc, cy + 80 * sc); _ctx.lineTo(cx - 28 * sc, cy + 130 * sc);
+        _ctx.moveTo(cx + 20 * sc, cy + 15 * sc); _ctx.lineTo(cx + 25 * sc, cy + 80 * sc); _ctx.lineTo(cx + 28 * sc, cy + 130 * sc);
+        _ctx.stroke();
+      } else if (d.type === "clear") {
+        _ctx.restore();
+        _ctx.clearRect(0, 0, _canvas.width, _canvas.height);
+        _updateThumb();
+        return;
+      }
+      _ctx.globalAlpha = 1; _ctx.restore();
+      _updateThumb();
+      var dot3 = document.getElementById("wbSyncDot");
+      if (dot3) { dot3.style.background = "#f39c12"; setTimeout(function() { if (dot3) dot3.style.background = "#2ecc71"; }, 400); }
+    };
+
+    _WB._toggle = function() { _isOpen ? _WB._close() : _WB._open(); };
+
+    _WB._open = function() {
+      _isOpen = true; _isMinimized = false;
+      var panel = document.getElementById("whiteboardPanel");
+      if (!panel) return;
+      panel.style.display = "flex";
+      requestAnimationFrame(function() { panel.style.transform = "translateX(0)"; });
+      var thumb = document.getElementById("wbThumbnail");
+      if (thumb) thumb.style.display = "none";
+      var btn = document.getElementById("wbToggleBtn");
+      if (btn) btn.style.background = "rgba(255,92,53,0.45)";
+      document.body.classList.add("wb-open");
+      setTimeout(_resizeCanvas, 360);
+      _showTip();
+    };
+
+    _WB._close = function() {
+      _isOpen = false;
+      var panel = document.getElementById("whiteboardPanel");
+      if (panel) { panel.style.transform = "translateX(100%)"; setTimeout(function() { if (panel) panel.style.display = "none"; }, 320); }
+      var thumb = document.getElementById("wbThumbnail");
+      if (thumb) thumb.style.display = "none";
+      var btn = document.getElementById("wbToggleBtn");
+      if (btn) btn.style.background = "rgba(255,255,255,0.18)";
+      document.body.classList.remove("wb-open");
+    };
+
+    _WB._minimize = function() {
+      _isMinimized = true;
+      var panel = document.getElementById("whiteboardPanel");
+      if (panel) { panel.style.transform = "translateX(100%)"; setTimeout(function() { if (panel) panel.style.display = "none"; }, 320); }
+      _updateThumb();
+      var thumb = document.getElementById("wbThumbnail");
+      if (thumb) thumb.style.display = "block";
+      document.body.classList.remove("wb-open");
+    };
+
+    _WB._restore = function() { _isMinimized = false; _WB._open(); };
+
+    function _showTip() {
+      try { if (sessionStorage.getItem("wb_tip")) return; } catch(e) {}
+      var cont = document.getElementById("wbCanvasContainer");
+      if (!cont) return;
+      var tip = document.createElement("div");
+      tip.style.cssText = "position:absolute;bottom:70px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.8);color:#fff;padding:7px 14px;border-radius:20px;font-size:12px;z-index:10;pointer-events:none;white-space:nowrap;";
+      tip.textContent = "☝ Use one finger to draw on mobile";
+      cont.appendChild(tip);
+      setTimeout(function() { if (tip.parentNode) tip.parentNode.removeChild(tip); }, 4000);
+      try { sessionStorage.setItem("wb_tip", "1"); } catch(e) {}
+    }
+
+    _WB._onCallEnd = function() {
+      _WB._close();
+      if (_autoSaveTimer) clearInterval(_autoSaveTimer);
+      try { sessionStorage.removeItem("wb_state"); } catch(e) {}
+      try { sessionStorage.removeItem("wb_tip"); } catch(e) {}
+    };
+
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", _init);
+    } else {
+      setTimeout(_init, 150);
+    }
+  })();
 
   // ── Entry point ───────────────────────────────────────────────────────────
   if (ROLE === "doctor") {

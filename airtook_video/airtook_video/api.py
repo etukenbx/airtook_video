@@ -1155,3 +1155,44 @@ def submit_rating(session_id, rating, comment=None, rated_by_role=None):
         frappe.db.commit()
 
     return {"session_id": session_id, "rating": rating}
+
+
+# ─── relay_whiteboard_stroke ──────────────────────────────────────────────────
+
+@frappe.whitelist()
+def relay_whiteboard_stroke(session_id, stroke_data):
+    """Relay a whiteboard stroke to the other call participant via Frappe realtime."""
+    import json as _json
+    if not session_id:
+        return
+    session = frappe.db.get_value(
+        SESSION_DTYPE, session_id,
+        ["practitioner", "patient_user"], as_dict=True
+    )
+    if not session:
+        return
+    my_user = frappe.session.user
+    practitioner_user = None
+    if session.get("practitioner"):
+        practitioner_user = frappe.db.get_value(
+            "Healthcare Practitioner", session["practitioner"], "user_id"
+        )
+    patient_user = session.get("patient_user") or ""
+    if my_user == practitioner_user:
+        target = patient_user
+        sender = "doctor"
+    else:
+        target = practitioner_user
+        sender = "patient"
+    if not target:
+        return
+    try:
+        parsed = _json.loads(stroke_data) if isinstance(stroke_data, str) else stroke_data
+    except Exception:
+        return
+    frappe.publish_realtime(
+        "wb_stroke",
+        {"stroke": parsed, "sender": sender},
+        user=target
+    )
+    return {"ok": 1}
