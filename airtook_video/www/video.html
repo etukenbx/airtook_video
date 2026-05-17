@@ -1323,7 +1323,9 @@
       var cont = document.getElementById("wbCanvasContainer");
       if (!cont) return;
       var w = cont.offsetWidth, h = cont.offsetHeight;
-      var img = _ctx ? _ctx.getImageData(0, 0, _canvas.width, _canvas.height) : null;
+      if (!w || !h) return;  // panel hidden — skip; _open() will re-call after slide-in
+      var img = (_ctx && _canvas.width > 0 && _canvas.height > 0)
+                  ? _ctx.getImageData(0, 0, _canvas.width, _canvas.height) : null;
       _canvas.width = w; _canvas.height = h;
       _gridCanvas.width = w; _gridCanvas.height = h;
       if (img) _ctx.putImageData(img, 0, 0);
