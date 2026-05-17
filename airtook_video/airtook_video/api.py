@@ -885,6 +885,147 @@ def end_session(session_id, transcript=None):
     return {"session_id": doc.name, "status": "completed"}
 
 
+# ─── check_pending_transcripts ───────────────────────────────────────────────
+
+@frappe.whitelist()
+def check_pending_transcripts():
+    """
+    Fallback: if Agora webhook hasn't fired within 10 minutes of call ending,
+    use OpenAI Whisper to transcribe the S3 recording directly.
+    Runs every 10 minutes via scheduler.
+    """
+    import tempfile, os
+
+    cutoff = frappe.utils.add_to_date(frappe.utils.now_datetime(), minutes=-10)
+
+    # Find sessions where recording stopped but transcript never arrived.
+    # "Processing" is excluded so concurrent scheduler runs don't double-process.
+    pending_sessions = frappe.db.get_all(
+        "AirTook Video Session",
+        filters={
+            "cloud_recording_status": "Stopped",
+            "transcript_status": ["not in", ["Received", "Saved to Encounter", "Failed", "Processing"]],
+            "modified": ["<", cutoff],
+        },
+        fields=["name", "recording_url", "channel_name", "appointment"],
+        limit=10,
+    )
+
+    if not pending_sessions:
+        return
+
+    openai_key = (frappe.conf.get("openai_api_key") or "").strip()
+    if not openai_key:
+        try:
+            openai_key = (
+                frappe.db.get_single_value("AirTook Configuration", "openai_api_key") or ""
+            ).strip()
+        except Exception:
+            pass
+    if not openai_key:
+        frappe.log_error("OpenAI key not configured for Whisper fallback", "Transcript Fallback")
+        return
+
+    import requests as _req
+
+    for session in pending_sessions:
+        try:
+            # Mark as Processing to prevent concurrent duplicate runs
+            frappe.db.set_value("AirTook Video Session", session.name,
+                "transcript_status", "Processing")
+            frappe.db.commit()
+
+            recording_url = (session.get("recording_url") or "").strip()
+            if not recording_url:
+                frappe.db.set_value("AirTook Video Session", session.name,
+                    "transcript_status", "Failed")
+                frappe.db.commit()
+                continue
+
+            # Download recording from S3 to a temp file
+            with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tmp:
+                tmp_path = tmp.name
+
+            try:
+                dl_resp = _req.get(recording_url, timeout=120, stream=True)
+                if dl_resp.status_code != 200:
+                    frappe.log_error(
+                        f"Download failed for {session.name}: HTTP {dl_resp.status_code}",
+                        "Transcript Fallback",
+                    )
+                    frappe.db.set_value("AirTook Video Session", session.name,
+                        "transcript_status", "Failed")
+                    frappe.db.commit()
+                    continue
+
+                with open(tmp_path, "wb") as f:
+                    for chunk in dl_resp.iter_content(chunk_size=8192):
+                        if chunk:
+                            f.write(chunk)
+
+                if os.path.getsize(tmp_path) < 10000:
+                    frappe.db.set_value("AirTook Video Session", session.name,
+                        "transcript_status", "Failed")
+                    frappe.db.commit()
+                    continue
+
+                # Send to Whisper
+                with open(tmp_path, "rb") as audio_file:
+                    whisper_resp = _req.post(
+                        "https://api.openai.com/v1/audio/transcriptions",
+                        headers={"Authorization": f"Bearer {openai_key}"},
+                        files={"file": ("audio.mp4", audio_file, "audio/mp4")},
+                        data={
+                            "model":    "whisper-1",
+                            "language": "en",
+                            "prompt":   "Medical consultation between doctor and patient in Nigeria.",
+                        },
+                        timeout=60,
+                    )
+
+                if whisper_resp.status_code != 200:
+                    frappe.log_error(
+                        f"Whisper failed for {session.name}: HTTP {whisper_resp.status_code} — {whisper_resp.text[:200]}",
+                        "Transcript Fallback",
+                    )
+                    frappe.db.set_value("AirTook Video Session", session.name,
+                        "transcript_status", "Failed")
+                    frappe.db.commit()
+                    continue
+
+                transcript_text = (whisper_resp.json().get("text") or "").strip()
+
+                if transcript_text:
+                    frappe.db.set_value("AirTook Video Session", session.name, {
+                        "transcript_text":   transcript_text,
+                        "transcript_status": "Received",
+                    })
+                    frappe.db.commit()
+                    _save_transcript_to_encounter(session.name, transcript_text)
+                else:
+                    frappe.db.set_value("AirTook Video Session", session.name,
+                        "transcript_status", "Failed")
+                    frappe.db.commit()
+
+            finally:
+                try:
+                    os.unlink(tmp_path)
+                except Exception:
+                    pass
+
+        except Exception as e:
+            frappe.log_error(
+                f"Whisper fallback failed for {session.name}: {e}",
+                "Transcript Fallback",
+            )
+            try:
+                frappe.db.set_value("AirTook Video Session", session.name,
+                    "transcript_status", "Failed")
+                frappe.db.commit()
+            except Exception:
+                pass
+
+
 # ─── extend_session ─────────────────────────────────────────────────────────
 
 @frappe.whitelist(methods=["POST"])

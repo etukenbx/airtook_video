@@ -428,6 +428,15 @@
       <div style="font-size:14px;color:rgba(255,255,255,0.55);">The consultation will start when your doctor joins</div>
     </div>
 
+    <!-- Translation: subtitle overlay shown on doctor's screen -->
+    <div id="subtitle-overlay" style="display:none;position:absolute;bottom:90px;left:50%;transform:translateX(-50%);max-width:88%;background:rgba(0,0,0,0.75);color:white;font-size:15px;line-height:1.5;padding:10px 18px;border-radius:10px;text-align:center;z-index:50;pointer-events:none"></div>
+
+    <!-- Translation: patient-side indicator (mic pulse while translating) -->
+    <div id="trans-indicator" style="display:none;position:absolute;top:64px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.6);color:white;font-size:12px;padding:5px 14px;border-radius:20px;align-items:center;gap:6px;z-index:50">
+      <div style="width:8px;height:8px;border-radius:50%;background:#27ae60;animation:recPulse 1.5s ease-in-out infinite;flex-shrink:0"></div>
+      <span>Translating…</span>
+    </div>
+
     <!-- Local video PIP -->
     <div id="local-video"></div>
 
@@ -454,6 +463,13 @@
           <div style="width:12px;height:12px;border-radius:50%;background:#FF4444;animation:recPulse 1.5s ease-in-out infinite"></div>
         </div>
         <span class="ctrl-label" style="color:#FF6B6B">REC</span>
+      </div>
+
+      <div class="ctrl-group" id="trans-btn-group" style="display:none">
+        <button class="ctrl-btn on" id="btn-trans" onclick="toggleTranslation()" title="Toggle translation">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M3 5h12M9 3v2M5 9c.5 2.5 2.5 4 4.5 4s4-1.5 4.5-4M21 21l-4.35-4.35M17 11l-6-6m6 6l-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <span class="ctrl-label" id="lbl-trans">Translate</span>
       </div>
 
       <div class="ctrl-group">
@@ -573,6 +589,7 @@
   var ROLE         = urlParams.get("role") || "patient";   // "doctor" | "patient"
   var APPOINTMENT  = urlParams.get("apt")  || "";
   var DURATION     = parseInt(urlParams.get("dur") || "30", 10);
+  var LANG         = urlParams.get("lang") || "";          // "yoruba"|"igbo"|"hausa"|"pidgin" for translation
 
   // CSRF
   function getCSRF() {
@@ -795,6 +812,10 @@
       showSection("vc-call");
       // Check recording status after a short delay (recording starts when doctor joins)
       setTimeout(_checkRecordingStatus, 3000);
+      // Auto-start translation 3s after joining if patient selected a language
+      if (LANG && LANG !== "en") {
+        setTimeout(_startTranslation, 3000);
+      }
       // Show waiting overlay until doctor publishes video
       document.getElementById("waiting-overlay").classList.remove("hidden");
       document.getElementById("preload-title").textContent = "Waiting for doctor…";
@@ -842,6 +863,7 @@
 
   window.executeEnd = async function () {
     if (_sessionEnded) return;
+    _stopTranslation();
     _sessionEnded = true;
     document.getElementById("btn-confirm-end-yes").disabled = true;
     document.getElementById("btn-confirm-end-yes").textContent = "Ending…";
@@ -949,6 +971,106 @@
     });
     document.addEventListener("mouseup", function () { dragging = false; });
   })();
+
+  // ── Real-time Translation ─────────────────────────────────────────────────
+  var _translationActive = false;
+  var _mediaRecorder     = null;
+  var _transStream       = null;
+
+  function _startTranslation() {
+    if (_translationActive || !LANG || LANG === "en" || ROLE !== "patient") return;
+    if (!window.MediaRecorder) return;
+    navigator.mediaDevices.getUserMedia({ audio: true, video: false }).then(function(stream) {
+      _transStream       = stream;
+      _translationActive = true;
+      var ind = document.getElementById("trans-indicator");
+      if (ind) ind.style.display = "flex";
+      var tbg = document.getElementById("trans-btn-group");
+      if (tbg) tbg.style.display = "";
+      var btn = document.getElementById("btn-trans");
+      if (btn) btn.classList.add("on");
+      var lbl = document.getElementById("lbl-trans");
+      if (lbl) lbl.textContent = "Translating";
+      _recordChunk(stream);
+    }).catch(function() {});
+  }
+
+  function _recordChunk(stream) {
+    if (!_translationActive) return;
+    var chunks   = [];
+    var mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+      ? "audio/webm;codecs=opus" : "audio/webm";
+    var mr = new MediaRecorder(stream, { mimeType: mimeType });
+    _mediaRecorder = mr;
+    mr.addEventListener("dataavailable", function(e) {
+      if (e.data && e.data.size > 0) chunks.push(e.data);
+    });
+    mr.addEventListener("stop", function() {
+      if (!_translationActive) return;
+      var blob = new Blob(chunks, { type: mimeType });
+      if (blob.size > 1000) _sendForTranslation(blob);
+      _recordChunk(stream);
+    });
+    mr.start();
+    setTimeout(function() {
+      if (_mediaRecorder === mr && mr.state === "recording") mr.stop();
+    }, 5000);
+  }
+
+  function _stopTranslation() {
+    _translationActive = false;
+    if (_mediaRecorder && _mediaRecorder.state !== "inactive") {
+      try { _mediaRecorder.stop(); } catch(e) {}
+    }
+    _mediaRecorder = null;
+    if (_transStream) {
+      _transStream.getTracks().forEach(function(t) { try { t.stop(); } catch(e) {} });
+      _transStream = null;
+    }
+    var ind = document.getElementById("trans-indicator");
+    if (ind) ind.style.display = "none";
+    var btn = document.getElementById("btn-trans");
+    if (btn) btn.classList.remove("on");
+    var lbl = document.getElementById("lbl-trans");
+    if (lbl) lbl.textContent = "Translate";
+  }
+
+  window.toggleTranslation = function() {
+    if (_translationActive) { _stopTranslation(); } else { _startTranslation(); }
+  };
+
+  function _sendForTranslation(blob) {
+    var reader = new FileReader();
+    reader.onload = function() {
+      var b64 = (reader.result || "").split(",")[1] || "";
+      if (!b64) return;
+      frappe.call({
+        method:   "airtook_core.airtook_core.api_dashboard.transcribe_and_translate",
+        args:     { audio_base64: b64, source_language: LANG, session_id: SESSION_ID },
+        callback: function() {},
+        error:    function() {},
+      });
+    };
+    reader.readAsDataURL(blob);
+  }
+
+  // Doctor: receive translated subtitles via Frappe realtime
+  if (ROLE === "doctor") {
+    (function _setupSubtitleListener() {
+      if (window.frappe && window.frappe.realtime && window.frappe.realtime.on) {
+        frappe.realtime.on("translation_subtitle", function(data) {
+          var overlay = document.getElementById("subtitle-overlay");
+          if (!overlay) return;
+          overlay.textContent = data.translated_text || data.original_text || "";
+          overlay.style.display = "block";
+          clearTimeout(window._subtitleTimer);
+          window._subtitleTimer = setTimeout(function() { overlay.style.display = "none"; }, 6000);
+        });
+      } else {
+        setTimeout(_setupSubtitleListener, 600);
+      }
+    })();
+  }
 
   // ── Entry point ───────────────────────────────────────────────────────────
   if (ROLE === "doctor") {
