@@ -356,6 +356,7 @@
   /* ── Animations ── */
   @keyframes spin { to { transform: rotate(360deg); } }
   @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+  @keyframes recPulse { 0%,100% { opacity:1; transform:scale(1); } 50% { opacity:0.35; transform:scale(0.75); } }
 
   @media (max-width: 600px) {
     .postcall-card { padding: 24px 20px; }
@@ -446,6 +447,13 @@
           <svg id="icon-cam-off" viewBox="0 0 24 24" fill="none" style="display:none;"><path d="M2 2l20 20M10.34 6H17a2 2 0 012 2v8.34M17 10l5-3v10l-5-3M2 7h1.34M2 7v12a2 2 0 002 2h10.34" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
         </button>
         <span class="ctrl-label" id="lbl-cam">Stop Video</span>
+      </div>
+
+      <div class="ctrl-group" id="rec-indicator" style="display:none">
+        <div style="width:36px;height:36px;border-radius:50%;background:rgba(255,68,68,0.15);display:flex;align-items:center;justify-content:center">
+          <div style="width:12px;height:12px;border-radius:50%;background:#FF4444;animation:recPulse 1.5s ease-in-out infinite"></div>
+        </div>
+        <span class="ctrl-label" style="color:#FF6B6B">REC</span>
       </div>
 
       <div class="ctrl-group">
@@ -739,6 +747,19 @@
     document.getElementById("btn-start-consult").style.display = "inline-flex";
   }
 
+  function _checkRecordingStatus() {
+    frappe.call({
+      method: "airtook_video.airtook_video.api.get_session_status",
+      args: { session_id: SESSION_ID },
+      callback: function(r) {
+        if (!r || !r.message) return;
+        var isRec = r.message.av_recording_status === "Recording" && r.message.patient_recording_consent;
+        var el = document.getElementById("rec-indicator");
+        if (el) el.style.display = isRec ? "flex" : "none";
+      },
+    });
+  }
+
   window.startConsultation = async function () {
     var btn = document.getElementById("btn-start-consult");
     btn.disabled = true;
@@ -754,6 +775,8 @@
       await initAgora();
       showSection("vc-call");
       document.getElementById("waiting-overlay").classList.add("hidden");
+      // Check if recording is active (patient may have consented)
+      setTimeout(_checkRecordingStatus, 4000);
     } catch (e) {
       var err = classifyAgoraError(e);
       showError(err.title, err.body);
@@ -770,6 +793,8 @@
     try {
       await initAgora();
       showSection("vc-call");
+      // Check recording status after a short delay (recording starts when doctor joins)
+      setTimeout(_checkRecordingStatus, 3000);
       // Show waiting overlay until doctor publishes video
       document.getElementById("waiting-overlay").classList.remove("hidden");
       document.getElementById("preload-title").textContent = "Waiting for doctor…";

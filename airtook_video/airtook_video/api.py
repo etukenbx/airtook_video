@@ -332,6 +332,105 @@ def _stop_cloud_recording(app_id, channel_name, uid, resource_id, sid):
     return None
 
 
+def _start_av_recording(app_id, channel_name, uid, resource_id, token, s3_bucket, s3_access_key, s3_secret_key):
+    """POST to Agora start for audio+video mix recording (separate from transcription). Returns sid or None."""
+    import requests as _req
+    try:
+        auth = _get_agora_auth_header()
+        url = (
+            f"https://api.agora.io/v1/apps/{app_id}/cloud_recording"
+            f"/resourceid/{resource_id}/mode/mix/start"
+        )
+        body = {
+            "cname": channel_name,
+            "uid": str(uid),
+            "clientRequest": {
+                "token": token,
+                "recordingConfig": {
+                    "maxIdleTime": 30,
+                    "streamTypes": 2,   # audio + video
+                    "channelType": 0,
+                },
+                "storageConfig": {
+                    "vendor": 1,
+                    "region": 0,
+                    "bucket": s3_bucket,
+                    "accessKey": s3_access_key,
+                    "secretKey": s3_secret_key,
+                    "fileNamePrefix": ["airtook", "recordings"],
+                },
+            },
+        }
+        r = _req.post(url, json=body, headers={"Authorization": auth, "Content-Type": "application/json"}, timeout=15)
+        if r.status_code == 200:
+            return r.json().get("sid")
+        frappe.log_error(f"Agora AV start failed {r.status_code}: {r.text[:300]}", "Agora Recording")
+    except Exception as e:
+        frappe.log_error(f"Agora AV start exception: {e}", "Agora Recording")
+    return None
+
+
+def _start_cloud_recording(session_name):
+    """Start audio+video cloud recording — only if patient consented. Runs after session goes active."""
+    try:
+        if not frappe.db.has_column("AirTook Video Session", "patient_recording_consent"):
+            return
+        _consent = frappe.db.get_value("AirTook Video Session", session_name, "patient_recording_consent")
+        if not _consent:
+            return
+
+        s3_bucket     = (frappe.conf.get("agora_s3_bucket") or "").strip()
+        s3_access_key = (frappe.conf.get("agora_s3_access_key") or "").strip()
+        s3_secret_key = (frappe.conf.get("agora_s3_secret_key") or "").strip()
+        if not s3_bucket:
+            try:
+                s3_bucket     = (frappe.db.get_single_value("AirTook Configuration", "agora_s3_bucket") or "").strip()
+                s3_access_key = (frappe.db.get_single_value("AirTook Configuration", "agora_s3_access_key") or "").strip()
+                s3_secret_key = (frappe.db.get_single_value("AirTook Configuration", "agora_s3_secret_key") or "").strip()
+            except Exception:
+                pass
+        if not s3_bucket or not s3_access_key or not s3_secret_key:
+            frappe.log_error("S3 not configured — AV recording skipped", "Agora Recording")
+            return
+
+        app_id, app_certificate = _get_agora_credentials()
+
+        _row = frappe.db.get_value(
+            "AirTook Video Session", session_name,
+            ["channel_name", "patient_uid"], as_dict=True,
+        )
+        channel_name = _row.channel_name
+        uid = str(_row.patient_uid)   # use patient_uid — different from transcription (uses doctor_uid)
+
+        try:
+            rec_token = _generate_agora_token(app_id, app_certificate, channel_name, int(uid), ROLE_SUBSCRIBER)
+        except Exception:
+            rec_token = ""
+
+        resource_id = _acquire_cloud_recording(app_id, channel_name, uid)
+        if not resource_id:
+            frappe.log_error("Could not acquire Agora resource for AV recording", "Agora Recording")
+            return
+
+        sid = _start_av_recording(app_id, channel_name, uid, resource_id, rec_token,
+                                   s3_bucket, s3_access_key, s3_secret_key)
+        if not sid:
+            frappe.log_error("Could not start Agora AV recording", "Agora Recording")
+            return
+
+        _upd = {
+            "av_recording_resource_id": resource_id,
+            "av_recording_sid":         sid,
+            "recording_started_at":     now_datetime(),
+        }
+        if frappe.db.has_column("AirTook Video Session", "av_recording_status"):
+            _upd["av_recording_status"] = "Recording"
+        frappe.db.set_value("AirTook Video Session", session_name, _upd)
+        frappe.db.commit()
+    except Exception as _e:
+        frappe.log_error(f"_start_cloud_recording failed: {_e}", "Agora Recording")
+
+
 def _save_transcript_to_encounter(session_name, transcript_text):
     """Create or update a draft Patient Encounter pre-filled with the transcript."""
     try:
@@ -449,12 +548,15 @@ def agora_transcription_webhook():
 
 @frappe.whitelist(methods=["GET", "POST"])
 def create_session(patient_appointment=None, appointment_name=None,
-                   duration_minutes=None, consultation_mode="Video", **kwargs):
+                   duration_minutes=None, consultation_mode="Video",
+                   recording_consent=0, **kwargs):
     _require_login()
 
     appt_name = appointment_name or patient_appointment
     if not appt_name:
         frappe.throw(_("appointment_name is required"), frappe.ValidationError)
+
+    _consent = int(recording_consent or 0)
 
     # Reuse an existing non-completed session for this appointment
     existing = frappe.db.get_value(
@@ -464,6 +566,10 @@ def create_session(patient_appointment=None, appointment_name=None,
     )
     if existing:
         doc = frappe.get_doc(SESSION_DTYPE, existing, ignore_permissions=True)
+        # Update consent flag if patient is setting it at join time
+        if _consent and frappe.db.has_column("AirTook Video Session", "patient_recording_consent"):
+            frappe.db.set_value("AirTook Video Session", existing, "patient_recording_consent", 1)
+            frappe.db.commit()
         return _build_session_response(doc)
 
     appt = frappe.get_doc("Patient Appointment", appt_name)
@@ -492,7 +598,7 @@ def create_session(patient_appointment=None, appointment_name=None,
     doctor_token  = _generate_agora_token(app_id, app_certificate, channel_name, doctor_uid,  ROLE_PUBLISHER)
     patient_token = _generate_agora_token(app_id, app_certificate, channel_name, patient_uid, ROLE_PUBLISHER)
 
-    doc = frappe.get_doc({
+    _doc_data = {
         "doctype":          SESSION_DTYPE,
         "appointment":      appt_name,
         "practitioner":     practitioner,
@@ -504,7 +610,10 @@ def create_session(patient_appointment=None, appointment_name=None,
         "duration_minutes": duration_minutes,
         "status":           "scheduled",
         "created_at":       now_datetime(),
-    })
+    }
+    if _consent and frappe.db.has_column("AirTook Video Session", "patient_recording_consent"):
+        _doc_data["patient_recording_consent"] = 1
+    doc = frappe.get_doc(_doc_data)
     doc.insert(ignore_permissions=True)
 
     if frappe.db.has_column("Patient Appointment", "airtook_video_session"):
@@ -543,13 +652,23 @@ def get_session_status(session_id):
     )
     if not row:
         frappe.throw("Session not found")
+
+    _av_status = ""
+    _rec_consent = 0
+    if frappe.db.has_column("AirTook Video Session", "av_recording_status"):
+        _av_status = frappe.db.get_value("AirTook Video Session", session_id, "av_recording_status") or ""
+    if frappe.db.has_column("AirTook Video Session", "patient_recording_consent"):
+        _rec_consent = int(frappe.db.get_value("AirTook Video Session", session_id, "patient_recording_consent") or 0)
+
     return {
-        "session_id":       session_id,
-        "status":           row.status,
-        "started_at":       str(row.started_at or ""),
-        "duration_minutes": row.duration_minutes or DEFAULT_DURATION_MINUTES,
-        "extensions_count": row.extensions_count or 0,
-        "appointment":      row.appointment or "",
+        "session_id":              session_id,
+        "status":                  row.status,
+        "started_at":              str(row.started_at or ""),
+        "duration_minutes":        row.duration_minutes or DEFAULT_DURATION_MINUTES,
+        "extensions_count":        row.extensions_count or 0,
+        "appointment":             row.appointment or "",
+        "av_recording_status":     _av_status,
+        "patient_recording_consent": _rec_consent,
     }
 
 
@@ -577,6 +696,13 @@ def start_session_timer(session_id):
         message={"session_id": session_id, "started_at": str(doc.started_at or now_datetime())},
         room=f"video_{session_id}",
     )
+
+    # Start AV cloud recording if patient consented (non-blocking)
+    try:
+        _start_cloud_recording(session_id)
+    except Exception as _e:
+        frappe.log_error(f"Cloud recording start failed: {_e}", "Agora Recording")
+
     return {"session_id": session_id, "status": "active", "started_at": str(doc.started_at or "")}
 
 
@@ -693,7 +819,7 @@ def end_session(session_id, transcript=None):
                     f"end_session: failed to enqueue summary for {doc.name}",
                 )
 
-        # ── Stop cloud recording ──────────────────────────────────────────────
+        # ── Stop transcription recording ──────────────────────────────────────
         try:
             _res_id = doc.get("cloud_recording_resource_id") or ""
             _sid    = doc.get("cloud_recording_sid") or ""
@@ -716,6 +842,45 @@ def end_session(session_id, transcript=None):
                     frappe.db.commit()
         except Exception as _e:
             frappe.log_error(f"Transcription stop failed: {_e}", "Agora Transcription")
+
+        # ── Stop AV cloud recording (patient-consented) ───────────────────────
+        try:
+            if frappe.db.has_column("AirTook Video Session", "av_recording_resource_id"):
+                _av_res_id = frappe.db.get_value("AirTook Video Session", session_id, "av_recording_resource_id") or ""
+                _av_sid    = frappe.db.get_value("AirTook Video Session", session_id, "av_recording_sid") or ""
+                if _av_res_id and _av_sid:
+                    _av_app_id = (
+                        frappe.db.get_single_value("AirTook Configuration", "agora_app_id") or
+                        frappe.conf.get("agora_app_id") or ""
+                    ).strip()
+                    _av_uid  = str(doc.get("patient_uid") or "")
+                    _av_resp = _stop_cloud_recording(_av_app_id, doc.channel_name, _av_uid, _av_res_id, _av_sid)
+
+                    _av_upd = {}
+                    if frappe.db.has_column("AirTook Video Session", "av_recording_status"):
+                        _av_upd["av_recording_status"] = "Stopped"
+                    if _av_resp and frappe.db.has_column("AirTook Video Session", "recording_url"):
+                        _file_list = (
+                            (_av_resp.get("serverResponse") or {}).get("fileList") or
+                            _av_resp.get("fileList") or []
+                        )
+                        if _file_list:
+                            _fname = (_file_list[0].get("filename") or "").strip()
+                            _s3_bkt = (frappe.conf.get("agora_s3_bucket") or "").strip()
+                            if not _s3_bkt:
+                                try:
+                                    _s3_bkt = (frappe.db.get_single_value("AirTook Configuration", "agora_s3_bucket") or "").strip()
+                                except Exception:
+                                    pass
+                            if _fname and _s3_bkt:
+                                from frappe.utils import add_days
+                                _av_upd["recording_url"]        = f"https://{_s3_bkt}.s3.amazonaws.com/{_fname}"
+                                _av_upd["recording_expires_at"] = add_days(now_datetime(), 30)
+                    if _av_upd:
+                        frappe.db.set_value("AirTook Video Session", session_id, _av_upd)
+                        frappe.db.commit()
+        except Exception as _e:
+            frappe.log_error(f"AV recording stop failed: {_e}", "Agora Recording")
 
     return {"session_id": doc.name, "status": "completed"}
 
