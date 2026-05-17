@@ -214,6 +214,237 @@ def _build_session_response(doc, doctor_token=None, patient_token=None):
     }
 
 
+# ─── Agora Cloud Recording ───────────────────────────────────────────────────
+
+def _get_agora_auth_header():
+    customer_key = (frappe.conf.get("agora_customer_key") or "").strip()
+    customer_secret = (frappe.conf.get("agora_customer_secret") or "").strip()
+    if not customer_key:
+        try:
+            customer_key = (
+                frappe.db.get_single_value("AirTook Configuration", "agora_customer_key") or ""
+            ).strip()
+        except Exception:
+            pass
+    if not customer_secret:
+        try:
+            customer_secret = (
+                frappe.db.get_single_value("AirTook Configuration", "agora_customer_secret") or ""
+            ).strip()
+        except Exception:
+            pass
+    credentials = base64.b64encode(f"{customer_key}:{customer_secret}".encode()).decode()
+    return f"Basic {credentials}"
+
+
+def _acquire_cloud_recording(app_id, channel_name, uid):
+    """POST to Agora acquire endpoint. Returns resourceId or None."""
+    import requests as _req
+    try:
+        auth = _get_agora_auth_header()
+        url = f"https://api.agora.io/v1/apps/{app_id}/cloud_recording/acquire"
+        body = {
+            "cname": channel_name,
+            "uid": str(uid),
+            "clientRequest": {
+                "resourceExpiredHour": 24,
+                "scene": 0,
+            },
+        }
+        r = _req.post(url, json=body, headers={"Authorization": auth, "Content-Type": "application/json"}, timeout=15)
+        if r.status_code == 200:
+            return r.json().get("resourceId")
+        frappe.log_error(f"Agora acquire failed {r.status_code}: {r.text[:300]}", "Agora Transcription")
+    except Exception as e:
+        frappe.log_error(f"Agora acquire exception: {e}", "Agora Transcription")
+    return None
+
+
+def _start_transcription(app_id, channel_name, uid, resource_id, token):
+    """POST to Agora start endpoint. Returns sid or None."""
+    import requests as _req
+    try:
+        s3_bucket = (frappe.conf.get("agora_s3_bucket") or "").strip()
+        s3_access_key = (frappe.conf.get("agora_s3_access_key") or "").strip()
+        s3_secret_key = (frappe.conf.get("agora_s3_secret_key") or "").strip()
+        if not s3_bucket or not s3_access_key or not s3_secret_key:
+            frappe.log_error(
+                "Agora S3 not configured — transcription disabled. Set agora_s3_bucket, agora_s3_access_key, agora_s3_secret_key in site_config.json.",
+                "Agora Transcription",
+            )
+            return None
+
+        auth = _get_agora_auth_header()
+        url = (
+            f"https://api.agora.io/v1/apps/{app_id}/cloud_recording"
+            f"/resourceid/{resource_id}/mode/mix/start"
+        )
+        body = {
+            "cname": channel_name,
+            "uid": str(uid),
+            "clientRequest": {
+                "token": token,
+                "recordingConfig": {
+                    "maxIdleTime": 30,
+                    "streamTypes": 0,
+                    "channelType": 0,
+                },
+                "transcodeOptions": {
+                    "transConfig": {
+                        "transcriptionMode": 1,
+                    }
+                },
+                "storageConfig": {
+                    "vendor": 1,
+                    "region": 0,
+                    "bucket": s3_bucket,
+                    "accessKey": s3_access_key,
+                    "secretKey": s3_secret_key,
+                    "fileNamePrefix": ["airtook", "transcripts"],
+                },
+            },
+        }
+        r = _req.post(url, json=body, headers={"Authorization": auth, "Content-Type": "application/json"}, timeout=15)
+        if r.status_code == 200:
+            return r.json().get("sid")
+        frappe.log_error(f"Agora start failed {r.status_code}: {r.text[:300]}", "Agora Transcription")
+    except Exception as e:
+        frappe.log_error(f"Agora start exception: {e}", "Agora Transcription")
+    return None
+
+
+def _stop_cloud_recording(app_id, channel_name, uid, resource_id, sid):
+    """POST to Agora stop endpoint. Returns response JSON or None."""
+    import requests as _req
+    try:
+        auth = _get_agora_auth_header()
+        url = (
+            f"https://api.agora.io/v1/apps/{app_id}/cloud_recording"
+            f"/resourceid/{resource_id}/sid/{sid}/mode/mix/stop"
+        )
+        body = {"cname": channel_name, "uid": str(uid), "clientRequest": {}}
+        r = _req.post(url, json=body, headers={"Authorization": auth, "Content-Type": "application/json"}, timeout=15)
+        if r.status_code == 200:
+            return r.json()
+        frappe.log_error(f"Agora stop failed {r.status_code}: {r.text[:300]}", "Agora Transcription")
+    except Exception as e:
+        frappe.log_error(f"Agora stop exception: {e}", "Agora Transcription")
+    return None
+
+
+def _save_transcript_to_encounter(session_name, transcript_text):
+    """Create or update a draft Patient Encounter pre-filled with the transcript."""
+    try:
+        session = frappe.get_doc("AirTook Video Session", session_name, ignore_permissions=True)
+
+        if not session.get("appointment"):
+            return
+
+        appointment = frappe.get_doc("Patient Appointment", session.appointment)
+
+        formatted_transcript = (
+            f"--- Consultation Transcript (Auto-generated) ---\n"
+            f"Date: {frappe.utils.nowdate()}\n"
+            f"Duration: {session.duration_minutes or 0} minutes\n\n"
+            f"{transcript_text}\n\n"
+            f"--- End of Transcript ---\n"
+            f"Note: This transcript was auto-generated by AirTook AI. "
+            f"Please review and edit before submitting."
+        )
+
+        existing = frappe.db.get_value(
+            "Patient Encounter",
+            {"appointment": session.appointment, "docstatus": 0},
+            "name",
+            order_by="creation desc",
+        )
+
+        if existing:
+            frappe.db.set_value(
+                "Patient Encounter", existing, "encounter_comment", formatted_transcript
+            )
+            encounter_name = existing
+        else:
+            enc = frappe.get_doc({
+                "doctype": "Patient Encounter",
+                "patient": appointment.patient,
+                "practitioner": appointment.practitioner,
+                "appointment": appointment.name,
+                "appointment_type": appointment.appointment_type or "",
+                "encounter_date": frappe.utils.nowdate(),
+                "encounter_comment": formatted_transcript,
+            })
+            enc.insert(ignore_permissions=True)
+            encounter_name = enc.name
+
+        frappe.db.set_value("AirTook Video Session", session_name, {
+            "transcript_encounter": encounter_name,
+            "transcript_status": "Saved to Encounter",
+        })
+        frappe.db.commit()
+
+    except Exception as e:
+        frappe.log_error(f"Save transcript failed: {e}\n{frappe.get_traceback()}", "Agora Transcription")
+        try:
+            frappe.db.set_value(
+                "AirTook Video Session", session_name, "transcript_status", "Failed"
+            )
+            frappe.db.commit()
+        except Exception:
+            pass
+
+
+# ─── Transcription webhook ───────────────────────────────────────────────────
+
+@frappe.whitelist(allow_guest=True)
+def agora_transcription_webhook():
+    """Receives Agora cloud recording transcription callback."""
+    import json as _json
+
+    payload = frappe.request.get_data(as_text=True)
+    try:
+        data = _json.loads(payload)
+    except Exception:
+        frappe.response["http_status_code"] = 400
+        return {"error": "invalid json"}
+
+    channel_name = (data.get("details") or {}).get("channelName", "")
+    transcriptions = (data.get("details") or {}).get("transcriptions") or []
+
+    if not channel_name:
+        return {"ok": True}
+
+    words = []
+    for t in transcriptions:
+        for w in (t.get("words") or []):
+            text = (w.get("text") or "").strip()
+            if text:
+                words.append(text)
+    transcript_text = " ".join(words).strip()
+
+    if not transcript_text:
+        return {"ok": True}
+
+    try:
+        session_name = frappe.db.get_value(
+            "AirTook Video Session", {"channel_name": channel_name}, "name"
+        )
+        if not session_name:
+            return {"ok": True}
+
+        frappe.db.set_value("AirTook Video Session", session_name, {
+            "transcript_text": transcript_text,
+            "transcript_status": "Received",
+        })
+        frappe.db.commit()
+
+        _save_transcript_to_encounter(session_name, transcript_text)
+    except Exception as e:
+        frappe.log_error(f"Transcription webhook error: {e}", "Agora Transcription")
+
+    return {"ok": True}
+
+
 # ─── create_session ──────────────────────────────────────────────────────────
 
 @frappe.whitelist(methods=["GET", "POST"])
@@ -280,6 +511,21 @@ def create_session(patient_appointment=None, appointment_name=None,
         frappe.db.set_value("Patient Appointment", appt_name, "airtook_video_session", doc.name)
 
     frappe.db.commit()
+
+    # Start cloud recording / transcription (non-blocking)
+    try:
+        resource_id = _acquire_cloud_recording(app_id, channel_name, str(doctor_uid))
+        if resource_id:
+            sid = _start_transcription(app_id, channel_name, str(doctor_uid), resource_id, doctor_token)
+            if sid:
+                _update = {"cloud_recording_resource_id": resource_id, "cloud_recording_sid": sid}
+                if frappe.db.has_column("AirTook Video Session", "cloud_recording_status"):
+                    _update["cloud_recording_status"] = "Recording"
+                frappe.db.set_value("AirTook Video Session", doc.name, _update)
+                frappe.db.commit()
+    except Exception as _e:
+        frappe.log_error(f"Transcription start failed: {_e}", "Agora Transcription")
+
     return _build_session_response(doc, doctor_token=doctor_token, patient_token=patient_token)
 
 
@@ -446,6 +692,30 @@ def end_session(session_id, transcript=None):
                     frappe.get_traceback(),
                     f"end_session: failed to enqueue summary for {doc.name}",
                 )
+
+        # ── Stop cloud recording ──────────────────────────────────────────────
+        try:
+            _res_id = doc.get("cloud_recording_resource_id") or ""
+            _sid    = doc.get("cloud_recording_sid") or ""
+            if _res_id and _sid:
+                _app_id = (
+                    frappe.db.get_single_value("AirTook Configuration", "agora_app_id") or
+                    frappe.conf.get("agora_app_id") or ""
+                ).strip()
+                _stop_cloud_recording(
+                    _app_id,
+                    doc.channel_name,
+                    str(doc.doctor_uid),
+                    _res_id,
+                    _sid,
+                )
+                if frappe.db.has_column("AirTook Video Session", "cloud_recording_status"):
+                    frappe.db.set_value(
+                        "AirTook Video Session", session_id, "cloud_recording_status", "Stopped"
+                    )
+                    frappe.db.commit()
+        except Exception as _e:
+            frappe.log_error(f"Transcription stop failed: {_e}", "Agora Transcription")
 
     return {"session_id": doc.name, "status": "completed"}
 
