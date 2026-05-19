@@ -1042,7 +1042,7 @@
       document.getElementById("postcall-sub").textContent = "We hope your consultation went well";
       document.getElementById("rating-label").textContent = "How was your doctor?";
       document.getElementById("btn-rebook").style.display = "inline-flex";
-      document.getElementById("btn-home").href = "/patient_access";
+      document.getElementById("btn-home").href = "/patient_access" + (APPOINTMENT ? "?consultation_ended=1&appointment=" + encodeURIComponent(APPOINTMENT) : "");
     }
   }
 
