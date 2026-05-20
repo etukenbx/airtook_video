@@ -533,6 +533,9 @@
         <button id="wbUndoBtn" title="Undo (Ctrl+Z)" onclick="window._WB&&_WB._undo()" style="background:#f0f0f0;border:none;border-radius:6px;width:26px;height:26px;cursor:pointer;font-size:13px;">&#8617;</button>
         <button id="wbRedoBtn" title="Redo (Ctrl+Y)" onclick="window._WB&&_WB._redo()" style="background:#f0f0f0;border:none;border-radius:6px;width:26px;height:26px;cursor:pointer;font-size:13px;">&#8618;</button>
         <button id="wbGridBtn" title="Toggle grid"   onclick="window._WB&&_WB._toggleGrid()" style="background:#f0f0f0;border:none;border-radius:6px;width:26px;height:26px;cursor:pointer;font-size:12px;">&#8862;</button>
+        <div style="width:1px;height:20px;background:#ddd;flex-shrink:0;"></div>
+        <button id="wbLaserBtn" title="Laser pointer" onclick="window._WB&&_WB._toggleWbLaser()" style="background:#f0f0f0;border:none;border-radius:6px;width:26px;height:26px;cursor:pointer;font-size:13px;">&#128308;</button>
+        <button id="wbSaveRecBtn" title="Save to patient records" onclick="window._WB&&_WB._saveToEncounter()" style="background:#f0f0f0;border:none;border-radius:6px;height:26px;padding:0 8px;cursor:pointer;font-size:11px;color:#333;white-space:nowrap;">&#128203; Rec</button>
       </div>
 
       <!-- Main area: tools + canvas -->
@@ -710,6 +713,8 @@
 
 <!-- Agora Web SDK -->
 <script src="https://download.agora.io/sdk/release/AgoraRTC_N-4.22.0.js"></script>
+<!-- Agora RTM SDK (whiteboard real-time sync) -->
+<script src="https://download.agora.io/sdk/release/AgoraRTM-1.5.1.js"></script>
 
 <script>
 (function () {
@@ -926,6 +931,7 @@
 
     try {
       await initAgora();
+      if (window._WB && APP_ID && CHANNEL) _WB._initWbRtm(APP_ID, UID, CHANNEL);
       showSection("vc-call");
       document.getElementById("waiting-overlay").classList.add("hidden");
       // Check if recording is active (patient may have consented)
@@ -945,6 +951,7 @@
 
     try {
       await initAgora();
+      if (window._WB && APP_ID && CHANNEL) _WB._initWbRtm(APP_ID, UID, CHANNEL);
       showSection("vc-call");
       // Check recording status after a short delay (recording starts when doctor joins)
       setTimeout(_checkRecordingStatus, 3000);
@@ -1343,6 +1350,7 @@
     }
 
     function _onDown(e) {
+      if (_wbLaserActive) return;
       if (e.type === "mousedown" && e.buttons !== 1) return;
       var c = _getCoords(e);
       _isDrawing = true;
@@ -1365,8 +1373,18 @@
     }
 
     function _onMove(e) {
-      if (!_isDrawing) return;
       var c = _getCoords(e);
+      if (_wbLaserActive) {
+        var _now = Date.now();
+        if (_now - _wbLastSend >= 16) {
+          _wbLastSend = _now;
+          var _nl = _wbNorm(c.x, c.y);
+          _wbSendRtm({ t: "laser", nx: _nl.nx, ny: _nl.ny });
+          _wbShowLaser(c.x, c.y, "local");
+        }
+        return;
+      }
+      if (!_isDrawing) return;
       if (_freeTools[_tool]) {
         _ctx.save();
         _ctx.beginPath(); _ctx.moveTo(_lastX, _lastY); _ctx.lineTo(c.x, c.y);
@@ -1376,6 +1394,14 @@
         _ctx.globalAlpha = _tool === "highlighter" ? 0.35 : 1;
         _ctx.stroke(); _ctx.restore();
         _currentPath.push({ x: c.x, y: c.y });
+        if (_wbRtmConnected) {
+          var _now2 = Date.now();
+          if (_now2 - _wbLastSend >= 16) {
+            _wbLastSend = _now2;
+            var _np = _wbNorm(c.x, c.y);
+            _wbSendRtm({ t: "pt", nx: _np.nx, ny: _np.ny, sz: _tool === "eraser" ? _size * 3 : _size, hl: _tool === "highlighter" ? 1 : 0 });
+          }
+        }
       } else if (_shapeTools[_tool] && _previewSnapshot) {
         _ctx.putImageData(_previewSnapshot, 0, 0);
         _ctx.save(); _ctx.setLineDash([6, 4]);
@@ -1386,12 +1412,21 @@
     }
 
     function _onUp(e) {
+      if (_wbLaserActive) {
+        _wbSendRtm({ t: "laser_off" });
+        _wbHideLaser("local");
+        return;
+      }
       if (!_isDrawing) return;
       _isDrawing = false;
       if (_freeTools[_tool]) {
         _ctx.globalAlpha = 1;
         if (_currentPath.length >= 2) {
-          _sendStroke({ type: "path", points: _currentPath, color: _color, size: _size, tool: _tool });
+          if (_wbRtmConnected) {
+            _wbSendRtm({ t: "end" });
+          } else {
+            _sendStroke({ type: "path", points: _currentPath, color: _color, size: _size, tool: _tool });
+          }
         }
       } else if (_shapeTools[_tool] && _previewSnapshot) {
         _undoStack.push(_previewSnapshot);
@@ -1488,11 +1523,170 @@
       _redoStack = [];
     }
 
-    _WB._undo = function() {
+    // ── Agora RTM whiteboard sync ────────────────────────────────────────────
+    var _wbRtm = null, _wbRtmChannel = null, _wbRtmConnected = false;
+    var _wbLastSend = 0, _wbRemoteLastPt = {};
+    var _wbLaserActive = false;
+
+    function _flashSyncDot(color) {
+      var dot = document.getElementById("wbSyncDot");
+      if (dot) { dot.style.background = color; setTimeout(function() { if (dot) dot.style.background = "#2ecc71"; }, 500); }
+    }
+
+    function _wbSendRtm(data) {
+      if (!_wbRtmConnected || !_wbRtmChannel) return false;
+      try { _wbRtmChannel.sendMessage({ text: JSON.stringify(data) }); return true; } catch(e) { return false; }
+    }
+
+    function _wbNorm(x, y) {
+      return { nx: _canvas ? x / _canvas.width : 0, ny: _canvas ? y / _canvas.height : 0 };
+    }
+
+    function _wbDenorm(nx, ny) {
+      return { x: _canvas ? nx * _canvas.width : 0, y: _canvas ? ny * _canvas.height : 0 };
+    }
+
+    function _wbHandleRtmMsg(data, fromUid) {
+      if (!_canvas || !_ctx) return;
+      var t = data.t;
+      var remColor = ROLE === "doctor" ? "#457B9D" : "#ff5c35";
+      if (t === "pt") {
+        var p = _wbDenorm(data.nx, data.ny);
+        var last = _wbRemoteLastPt[fromUid];
+        if (last) {
+          _ctx.save();
+          _ctx.beginPath(); _ctx.moveTo(last.x, last.y); _ctx.lineTo(p.x, p.y);
+          _ctx.lineCap = "round"; _ctx.lineJoin = "round";
+          _ctx.lineWidth = data.sz || 3;
+          _ctx.strokeStyle = remColor;
+          _ctx.globalAlpha = data.hl ? 0.35 : 1;
+          _ctx.stroke(); _ctx.restore();
+          _updateThumb();
+        }
+        _wbRemoteLastPt[fromUid] = p;
+      } else if (t === "end") {
+        delete _wbRemoteLastPt[fromUid];
+        _flashSyncDot("#f39c12");
+      } else if (t === "undo") {
+        _WB._undo(false);
+      } else if (t === "laser") {
+        var lp = _wbDenorm(data.nx, data.ny);
+        _wbShowLaser(lp.x, lp.y, fromUid);
+      } else if (t === "laser_off") {
+        _wbHideLaser(fromUid);
+      } else if (t === "shape") {
+        var p1 = _wbDenorm(data.x1, data.y1), p2 = _wbDenorm(data.x2, data.y2);
+        _drawShapeTo(data.tool, p1.x, p1.y, p2.x, p2.y, data.color || remColor, data.sz || 3, _ctx);
+        _updateThumb(); _flashSyncDot("#f39c12");
+      } else if (t === "text") {
+        var tp = _wbDenorm(data.nx, data.ny);
+        var fs = Math.max(12, (data.sz || 5) * 2);
+        _ctx.save();
+        _ctx.font = "bold " + fs + "px -apple-system, \"DM Sans\", sans-serif";
+        _ctx.fillStyle = data.color || remColor;
+        _ctx.fillText(data.text || "", tp.x, tp.y);
+        _ctx.restore();
+        _updateThumb(); _flashSyncDot("#f39c12");
+      } else if (t === "clear") {
+        _ctx.clearRect(0, 0, _canvas.width, _canvas.height);
+        _updateThumb(); _flashSyncDot("#f39c12");
+      } else if (t === "body") {
+        var bp = _wbDenorm(data.nx, data.ny);
+        var sc = data.sc || 1;
+        _ctx.save();
+        _ctx.strokeStyle = remColor; _ctx.lineWidth = Math.max(1.5, sc * 2); _ctx.lineCap = "round";
+        _ctx.beginPath(); _ctx.ellipse(bp.x, bp.y - 120 * sc, 25 * sc, 30 * sc, 0, 0, Math.PI * 2); _ctx.stroke();
+        _ctx.beginPath(); _ctx.rect(bp.x - 35 * sc, bp.y - 75 * sc, 70 * sc, 90 * sc); _ctx.stroke();
+        _ctx.beginPath();
+        _ctx.moveTo(bp.x - 35 * sc, bp.y - 70 * sc); _ctx.lineTo(bp.x - 65 * sc, bp.y - 20 * sc); _ctx.lineTo(bp.x - 70 * sc, bp.y + 20 * sc);
+        _ctx.moveTo(bp.x + 35 * sc, bp.y - 70 * sc); _ctx.lineTo(bp.x + 65 * sc, bp.y - 20 * sc); _ctx.lineTo(bp.x + 70 * sc, bp.y + 20 * sc);
+        _ctx.stroke();
+        _ctx.beginPath();
+        _ctx.moveTo(bp.x - 20 * sc, bp.y + 15 * sc); _ctx.lineTo(bp.x - 25 * sc, bp.y + 80 * sc); _ctx.lineTo(bp.x - 28 * sc, bp.y + 130 * sc);
+        _ctx.moveTo(bp.x + 20 * sc, bp.y + 15 * sc); _ctx.lineTo(bp.x + 25 * sc, bp.y + 80 * sc); _ctx.lineTo(bp.x + 28 * sc, bp.y + 130 * sc);
+        _ctx.stroke(); _ctx.restore();
+        _updateThumb(); _flashSyncDot("#f39c12");
+      }
+    }
+
+    function _wbShowLaser(x, y, uid) {
+      var id = "wbLaser_" + (uid || "r");
+      var dot = document.getElementById(id);
+      if (!dot) {
+        dot = document.createElement("div");
+        dot.id = id;
+        dot.style.cssText = "position:absolute;width:14px;height:14px;border-radius:50%;background:rgba(255,30,30,0.9);box-shadow:0 0 8px 4px rgba(255,30,30,0.5);pointer-events:none;transform:translate(-50%,-50%);z-index:20;";
+        var cont = document.getElementById("wbCanvasContainer");
+        if (cont) cont.appendChild(dot);
+      }
+      dot.style.display = "block";
+      dot.style.left = x + "px"; dot.style.top = y + "px";
+    }
+
+    function _wbHideLaser(uid) {
+      var dot = document.getElementById("wbLaser_" + (uid || "r"));
+      if (dot) dot.style.display = "none";
+    }
+
+    _WB._toggleWbLaser = function() {
+      _wbLaserActive = !_wbLaserActive;
+      var btn = document.getElementById("wbLaserBtn");
+      if (_wbLaserActive) {
+        if (btn) { btn.style.background = "#E63946"; btn.style.color = "#fff"; }
+        if (_canvas) _canvas.style.cursor = "none";
+      } else {
+        if (btn) { btn.style.background = "#f0f0f0"; btn.style.color = ""; }
+        _wbSendRtm({ t: "laser_off" });
+        _wbHideLaser("local");
+        if (_canvas) _canvas.style.cursor = "crosshair";
+      }
+    };
+
+    _WB._initWbRtm = async function(appId, uid, channelName) {
+      if (!window.AgoraRTM || !appId) return;
+      try {
+        _wbRtm = AgoraRTM.createInstance(appId);
+        await _wbRtm.login({ uid: String(uid) });
+        _wbRtmChannel = _wbRtm.createChannel("wb_" + channelName);
+        await _wbRtmChannel.join();
+        _wbRtmConnected = true;
+        _wbRtmChannel.on("ChannelMessage", function(msg, memberId) {
+          try { _wbHandleRtmMsg(JSON.parse(msg.text), memberId); } catch(e) {}
+        });
+        _flashSyncDot("#2ecc71");
+      } catch(e) {
+        _wbRtmConnected = false;
+      }
+    };
+
+    _WB._saveToEncounter = function() {
+      if (!_canvas || !APPOINTMENT) return;
+      var blank = document.createElement("canvas");
+      blank.width = _canvas.width; blank.height = _canvas.height;
+      var bCtx = blank.getContext("2d");
+      bCtx.fillStyle = "#ffffff"; bCtx.fillRect(0, 0, blank.width, blank.height);
+      bCtx.drawImage(_canvas, 0, 0);
+      var b64 = blank.toDataURL("image/jpeg", 0.85).replace(/^data:image\/jpeg;base64,/, "");
+      var btn = document.getElementById("wbSaveRecBtn");
+      if (btn) { btn.textContent = "Saving…"; btn.disabled = true; }
+      frappe.call({
+        method: "airtook_core.api_dashboard.save_whiteboard_to_encounter",
+        args: { appointment_name: APPOINTMENT, image_data: b64 },
+        callback: function() {
+          if (btn) { btn.textContent = "✓ Saved"; btn.disabled = false; setTimeout(function() { if (btn) btn.innerHTML = "&#128203; Rec"; }, 2500); }
+        },
+        error: function() {
+          if (btn) { btn.textContent = "✗ Failed"; btn.disabled = false; setTimeout(function() { if (btn) btn.innerHTML = "&#128203; Rec"; }, 2000); }
+        },
+      });
+    };
+
+    _WB._undo = function(broadcast) {
       if (!_undoStack.length || !_ctx) return;
       _redoStack.push(_ctx.getImageData(0, 0, _canvas.width, _canvas.height));
       _ctx.putImageData(_undoStack.pop(), 0, 0);
       _updateThumb();
+      if (broadcast !== false) _wbSendRtm({ t: "undo" });
     };
 
     _WB._redo = function() {
@@ -1579,16 +1773,35 @@
       } catch(e) {}
     }
 
-    function _sendStroke(data) {
+    function _sendStrokeFrappe(data) {
       frappe.call({
         method: "airtook_video.airtook_video.api.relay_whiteboard_stroke",
         args: { session_id: SESSION_ID, stroke_data: JSON.stringify(data) },
-        callback: function() {
-          var dot = document.getElementById("wbSyncDot");
-          if (dot) { dot.style.background = "#f39c12"; setTimeout(function() { if (dot) dot.style.background = "#2ecc71"; }, 500); }
-        },
+        callback: function() { _flashSyncDot("#f39c12"); },
         error: function() {},
       });
+    }
+
+    function _sendStroke(data) {
+      if (_wbRtmConnected) {
+        if (data.type === "path") return;
+        var sent = false;
+        if (data.type === "shape") {
+          var _n1 = _wbNorm(data.x1, data.y1), _n2 = _wbNorm(data.x2, data.y2);
+          sent = _wbSendRtm({ t: "shape", tool: data.tool, x1: _n1.nx, y1: _n1.ny, x2: _n2.nx, y2: _n2.ny, color: data.color, sz: data.size });
+        } else if (data.type === "text") {
+          var _nt = _wbNorm(data.x, data.y);
+          sent = _wbSendRtm({ t: "text", text: data.text, nx: _nt.nx, ny: _nt.ny, color: data.color, sz: data.size });
+        } else if (data.type === "body") {
+          var _nb = _wbNorm(data.cx, data.cy);
+          sent = _wbSendRtm({ t: "body", nx: _nb.nx, ny: _nb.ny, sc: data.sc });
+        } else if (data.type === "clear") {
+          sent = _wbSendRtm({ t: "clear" });
+        }
+        if (!sent) _sendStrokeFrappe(data);
+      } else {
+        _sendStrokeFrappe(data);
+      }
     }
 
     _WB._handleRemote = function(msg) {
@@ -1699,6 +1912,24 @@
     _WB._onCallEnd = function() {
       _WB._close();
       if (_autoSaveTimer) clearInterval(_autoSaveTimer);
+      if (_wbRtmConnected) {
+        try { _wbRtmChannel && _wbRtmChannel.leave(); } catch(e) {}
+        try { _wbRtm && _wbRtm.logout(); } catch(e) {}
+        _wbRtmConnected = false;
+      }
+      if (ROLE === "doctor" && APPOINTMENT && _canvas && _canvas.width > 0) {
+        var _blank = document.createElement("canvas");
+        _blank.width = _canvas.width; _blank.height = _canvas.height;
+        var _bCtx = _blank.getContext("2d");
+        _bCtx.fillStyle = "#ffffff"; _bCtx.fillRect(0, 0, _blank.width, _blank.height);
+        _bCtx.drawImage(_canvas, 0, 0);
+        var _sample = _bCtx.getImageData(Math.floor(_blank.width * 0.25), Math.floor(_blank.height * 0.25), Math.floor(_blank.width * 0.5), Math.floor(_blank.height * 0.5));
+        var _hasContent = false;
+        for (var _ip = 0; _ip < _sample.data.length; _ip += 4) {
+          if (_sample.data[_ip] < 250 || _sample.data[_ip + 1] < 250 || _sample.data[_ip + 2] < 250) { _hasContent = true; break; }
+        }
+        if (_hasContent) _WB._saveToEncounter();
+      }
       try { sessionStorage.removeItem("wb_state"); } catch(e) {}
       try { sessionStorage.removeItem("wb_tip"); } catch(e) {}
     };
