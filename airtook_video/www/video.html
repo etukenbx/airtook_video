@@ -727,6 +727,7 @@
   var CHANNEL      = urlParams.get("ch")   || "";
   var UID          = parseInt(urlParams.get("uid") || "0", 10);
   var TOKEN        = urlParams.get("tok")  || "";
+  var RTM_TOKEN    = urlParams.get("rtm")  || "";
   var ROLE         = urlParams.get("role") || "patient";   // "doctor" | "patient"
   var APPOINTMENT  = urlParams.get("apt")  || "";
   var DURATION     = parseInt(urlParams.get("dur") || "30", 10);
@@ -931,7 +932,7 @@
 
     try {
       await initAgora();
-      if (window._WB && APP_ID && CHANNEL) _WB._initWbRtm(APP_ID, UID, CHANNEL);
+      if (window._WB && APP_ID && CHANNEL) _WB._initWbRtm(APP_ID, UID, CHANNEL, RTM_TOKEN);
       showSection("vc-call");
       document.getElementById("waiting-overlay").classList.add("hidden");
       // Check if recording is active (patient may have consented)
@@ -951,7 +952,7 @@
 
     try {
       await initAgora();
-      if (window._WB && APP_ID && CHANNEL) _WB._initWbRtm(APP_ID, UID, CHANNEL);
+      if (window._WB && APP_ID && CHANNEL) _WB._initWbRtm(APP_ID, UID, CHANNEL, RTM_TOKEN);
       showSection("vc-call");
       // Check recording status after a short delay (recording starts when doctor joins)
       setTimeout(_checkRecordingStatus, 3000);
@@ -1550,6 +1551,9 @@
       if (!_canvas || !_ctx) return;
       var t = data.t;
       var remColor = ROLE === "doctor" ? "#457B9D" : "#ff5c35";
+      if (!_isOpen && !_isMinimized && (t === "pt" || t === "shape" || t === "text" || t === "body" || t === "clear")) {
+        _WB._open();
+      }
       if (t === "pt") {
         var p = _wbDenorm(data.nx, data.ny);
         var last = _wbRemoteLastPt[fromUid];
@@ -1642,11 +1646,13 @@
       }
     };
 
-    _WB._initWbRtm = async function(appId, uid, channelName) {
+    _WB._initWbRtm = async function(appId, uid, channelName, rtmToken) {
       if (!window.AgoraRTM || !appId) return;
       try {
         _wbRtm = AgoraRTM.createInstance(appId);
-        await _wbRtm.login({ uid: String(uid) });
+        var loginOpts = { uid: String(uid) };
+        if (rtmToken) loginOpts.token = rtmToken;
+        await _wbRtm.login(loginOpts);
         _wbRtmChannel = _wbRtm.createChannel("wb_" + channelName);
         await _wbRtmChannel.join();
         _wbRtmConnected = true;

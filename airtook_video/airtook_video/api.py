@@ -120,6 +120,19 @@ def _generate_agora_token(app_id, app_certificate, channel_name, uid,
     return _generate_agora_token_manual(app_id, app_certificate, channel_name, uid, role, expire_ts)
 
 
+def _generate_agora_rtm_token(app_id, app_certificate, uid, expire_seconds=TOKEN_EXPIRE_SECONDS):
+    """Generate an Agora RTM token for whiteboard sync. uid is converted to string."""
+    if not app_id or not app_certificate:
+        return ""
+    expire_ts = int(time.time()) + expire_seconds
+    try:
+        from agora_token_builder import RtmTokenBuilder
+        return RtmTokenBuilder.buildToken(app_id, app_certificate, str(uid), 1, expire_ts)
+    except Exception:
+        frappe.log_error(frappe.get_traceback(), "RTM token generation failed")
+    return ""
+
+
 # ─── Helpers ─────────────────────────────────────────────────────────────────
 
 def _require_login():
@@ -161,7 +174,7 @@ def _get_fee_per_minute(appointment_type, mode="Video"):
     return round(base / minutes, 2)
 
 
-def _build_join_url(session_name, channel_name, uid, token, role, appointment_name, duration_minutes):
+def _build_join_url(session_name, channel_name, uid, token, role, appointment_name, duration_minutes, rtm_tok=""):
     from urllib.parse import urlencode
     params = urlencode({
         "ch":   channel_name,
@@ -170,6 +183,7 @@ def _build_join_url(session_name, channel_name, uid, token, role, appointment_na
         "role": role,
         "apt":  appointment_name or "",
         "dur":  duration_minutes,
+        "rtm":  rtm_tok,
     })
     return f"{get_url()}/video/{session_name}?{params}"
 
@@ -179,6 +193,7 @@ def _build_session_response(doc, doctor_token=None, patient_token=None):
         frappe.db.get_single_value("AirTook Configuration", "agora_app_id") or
         frappe.conf.get("agora_app_id") or ""
     )
+    app_cert = ""
     if not doctor_token or not patient_token:
         try:
             app_cert = (
@@ -191,10 +206,21 @@ def _build_session_response(doc, doctor_token=None, patient_token=None):
         except Exception:
             doctor_token  = doctor_token  or ""
             patient_token = patient_token or ""
+    else:
+        try:
+            app_cert = (
+                frappe.db.get_single_value("AirTook Configuration", "agora_app_certificate") or
+                frappe.conf.get("agora_app_certificate") or ""
+            )
+        except Exception:
+            pass
+
+    doctor_rtm_tok  = _generate_agora_rtm_token(app_id, app_cert, doc.doctor_uid)
+    patient_rtm_tok = _generate_agora_rtm_token(app_id, app_cert, doc.patient_uid)
 
     dur = int(doc.duration_minutes or DEFAULT_DURATION_MINUTES)
-    doctor_join_url  = _build_join_url(doc.name, doc.channel_name, doc.doctor_uid,  doctor_token,  "doctor",  doc.appointment, dur)
-    patient_join_url = _build_join_url(doc.name, doc.channel_name, doc.patient_uid, patient_token, "patient", doc.appointment, dur)
+    doctor_join_url  = _build_join_url(doc.name, doc.channel_name, doc.doctor_uid,  doctor_token,  "doctor",  doc.appointment, dur, doctor_rtm_tok)
+    patient_join_url = _build_join_url(doc.name, doc.channel_name, doc.patient_uid, patient_token, "patient", doc.appointment, dur, patient_rtm_tok)
 
     return {
         "session_id":        doc.name,
