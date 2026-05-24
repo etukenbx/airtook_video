@@ -631,6 +631,15 @@
       </div>
     </div>
 
+    <!-- 3-minute warning + extension upsell overlay -->
+    <div id="extend-overlay" style="display:none;position:absolute;inset:0;background:rgba(0,0,0,0.82);z-index:300;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:24px;text-align:center;">
+      <div id="extend-title" style="font-family:'Sora',sans-serif;font-size:22px;font-weight:700;color:#fff;">3 minutes remaining</div>
+      <div id="extend-sub" style="font-size:15px;color:rgba(255,255,255,0.7);max-width:340px;line-height:1.5;">Need more time? Extend your session at a 20% discount — deducted from your wallet instantly.</div>
+      <div id="extend-price-row" style="display:flex;gap:10px;flex-wrap:wrap;justify-content:center;margin-top:4px;"></div>
+      <div id="extend-grace-msg" style="display:none;font-size:13px;color:#FFB800;margin-top:4px;">Grace period — session ending in <span id="grace-countdown">3:00</span></div>
+      <button onclick="dismissExtendOverlay()" style="margin-top:8px;background:none;border:1px solid rgba(255,255,255,0.3);color:rgba(255,255,255,0.6);padding:8px 20px;border-radius:8px;font-size:13px;cursor:pointer;">Dismiss</button>
+    </div>
+
   </div>
 
   <!-- Post-call panel -->
@@ -778,17 +787,151 @@
   // ── Timer ──────────────────────────────────────────────────────────────────
   var _callStart = null, _timerInterval = null;
   var _totalSeconds = DURATION * 60;
+  var _warnShown = false, _graceActive = false, _graceInterval = null;
+  var _extendInProgress = false;
+
+  // Build extension price buttons once (fetched lazily)
+  var _extFees = null;
+
+  function _fetchExtensionFees() {
+    if (_extFees !== null || ROLE !== "patient") return;
+    _extFees = {};
+    // Estimate per-minute rate from appointment type; fall back to 0 (server-side verified anyway)
+    var _priceRow = document.getElementById("extend-price-row");
+    if (!_priceRow) return;
+    _priceRow.innerHTML = "";
+    [15, 30, 45, 60].forEach(function (mins) {
+      frappe.call({
+        method: "airtook_video.airtook_video.api.get_extension_fee",
+        args: { session_id: SESSION_ID, extend_minutes: mins },
+        callback: function (r) {
+          if (!r || !r.message) return;
+          var fee = r.message.fee || 0;
+          var orig = r.message.original || 0;
+          var btn = document.createElement("button");
+          btn.style.cssText =
+            "background:#0066FF;border:none;color:#fff;padding:10px 18px;border-radius:10px;"
+            + "font-size:14px;font-weight:600;cursor:pointer;line-height:1.3;";
+          btn.innerHTML = "+" + mins + " min<br><small style='font-weight:400;font-size:11px;'>"
+            + (orig > 0 ? "<s>₦" + orig.toLocaleString() + "</s> " : "")
+            + "₦" + fee.toLocaleString() + "</small>";
+          btn.onclick = function () { requestExtension(mins, fee); };
+          _priceRow.appendChild(btn);
+        },
+        error: function () {
+          // Fallback: show plain buttons without price
+          var btn = document.createElement("button");
+          btn.style.cssText =
+            "background:#0066FF;border:none;color:#fff;padding:10px 18px;border-radius:10px;"
+            + "font-size:14px;font-weight:600;cursor:pointer;";
+          btn.textContent = "+" + mins + " min";
+          btn.onclick = function () { requestExtension(mins, null); };
+          _priceRow.appendChild(btn);
+        },
+      });
+    });
+  }
+
+  function requestExtension(mins, fee) {
+    if (_extendInProgress) return;
+    _extendInProgress = true;
+    frappe.call({
+      method: "airtook_video.airtook_video.api.extend_session",
+      args: { session_id: SESSION_ID, extend_minutes: mins },
+      callback: function (r) {
+        _extendInProgress = false;
+        if (!r || !r.message) return;
+        var msg = r.message;
+        if (msg.ok) {
+          // Reset timer to new duration
+          var newDur = msg.new_duration_minutes || (DURATION + mins);
+          _totalSeconds = newDur * 60;
+          _callStart    = Date.now();   // restart elapsed from now with new total
+          _warnShown    = false;
+          _graceActive  = false;
+          if (_graceInterval) { clearInterval(_graceInterval); _graceInterval = null; }
+          dismissExtendOverlay();
+          document.getElementById("call-timer").style.color = "";
+          document.getElementById("extend-sub").textContent =
+            "Need more time? Extend your session at a 20% discount — deducted from your wallet instantly.";
+        } else if (msg.error === "insufficient_balance") {
+          document.getElementById("extend-sub").textContent =
+            "Insufficient wallet balance. Top up your wallet to extend this session.";
+        } else {
+          document.getElementById("extend-sub").textContent =
+            "Extension failed. Please try again.";
+          _extendInProgress = false;
+        }
+      },
+      error: function () {
+        _extendInProgress = false;
+        document.getElementById("extend-sub").textContent =
+          "Extension failed. Please try again.";
+      },
+    });
+  }
+
+  window.dismissExtendOverlay = function () {
+    var ov = document.getElementById("extend-overlay");
+    if (ov) ov.style.display = "none";
+  };
+
+  function showExtendOverlay(isGrace) {
+    var ov = document.getElementById("extend-overlay");
+    if (!ov) return;
+    ov.style.display = "flex";
+    if (isGrace) {
+      document.getElementById("extend-title").textContent = "Session time is up";
+      document.getElementById("extend-grace-msg").style.display = "";
+    }
+    if (ROLE === "patient") _fetchExtensionFees();
+    else {
+      // Doctor sees a simpler message
+      document.getElementById("extend-sub").textContent =
+        "Your session time has ended. The patient can extend the session if needed.";
+      document.getElementById("extend-price-row").innerHTML = "";
+    }
+  }
+
+  function startGracePeriod() {
+    if (_graceActive) return;
+    _graceActive = true;
+    showExtendOverlay(true);
+    var graceLeft = 180; // 3 minutes
+    var graceEl   = document.getElementById("grace-countdown");
+    _graceInterval = setInterval(function () {
+      graceLeft--;
+      if (graceEl) {
+        var m = String(Math.floor(graceLeft / 60)).padStart(2, "0");
+        var s = String(graceLeft % 60).padStart(2, "0");
+        graceEl.textContent = m + ":" + s;
+      }
+      if (graceLeft <= 0) {
+        clearInterval(_graceInterval);
+        _graceInterval = null;
+        if (ROLE === "doctor") executeEnd();  // doctor auto-ends after grace
+      }
+    }, 1000);
+  }
 
   function startTimer() {
     _callStart = Date.now();
     var timerEl = document.getElementById("call-timer");
     _timerInterval = setInterval(function () {
-      var elapsed = Math.floor((Date.now() - _callStart) / 1000);
-      var remaining = _totalSeconds - elapsed;
-      if (remaining <= 0) {
+      var elapsed    = Math.floor((Date.now() - _callStart) / 1000);
+      var remaining  = _totalSeconds - elapsed;
+
+      if (remaining <= 0 && !_graceActive) {
         timerEl.textContent = "00:00";
         timerEl.style.color = "#FF6B6B";
+        startGracePeriod();
         return;
+      }
+      if (_graceActive) return;   // grace period handles its own countdown
+
+      if (remaining <= 180 && !_warnShown) {
+        _warnShown = true;
+        showExtendOverlay(false);
       }
       if (remaining <= 120) timerEl.style.color = "#FF6B6B";
       else if (remaining <= 300) timerEl.style.color = "#f59e0b";
@@ -801,6 +944,7 @@
 
   function stopTimer() {
     clearInterval(_timerInterval);
+    if (_graceInterval) clearInterval(_graceInterval);
     if (!_callStart) return "—";
     var s = Math.floor((Date.now() - _callStart) / 1000);
     var m = Math.floor(s / 60);
@@ -1041,20 +1185,35 @@
     if (ROLE === "doctor") {
       document.getElementById("postcall-title").textContent = "Consultation complete";
       document.getElementById("postcall-sub").textContent = "Session summary for your records";
-      document.getElementById("rating-label").textContent = "Rate this consultation";
-      document.getElementById("rating-comment").placeholder = "Clinical observations (optional)…";
+      // Doctor: hide star rating, show only clinical note textarea
+      document.getElementById("star-row").style.display = "none";
+      document.getElementById("rating-label").textContent = "Clinical observations (optional)";
+      document.getElementById("rating-comment").placeholder = "Add brief session notes…";
+      document.getElementById("btn-submit-rating").textContent = "Save note";
       document.getElementById("btn-patient-record").style.display = "inline-flex";
       document.getElementById("btn-home").href = "/doctor";
     } else {
+      // Patient: redirect to patient_access for the full 5-question survey
       document.getElementById("postcall-title").textContent = "Consultation ended";
       document.getElementById("postcall-sub").textContent = "We hope your consultation went well";
-      document.getElementById("rating-label").textContent = "How was your doctor?";
+      document.getElementById("rating-section").innerHTML =
+        '<h4 style="margin-bottom:12px;">How was your doctor?</h4>'
+        + '<p style="font-size:14px;color:#57606A;margin-bottom:16px;">'
+        + 'Share your experience to help other patients and improve care quality.</p>'
+        + '<a class="btn-pc primary" href="'
+        + '/patient_access' + (APPOINTMENT ? '?rate=' + encodeURIComponent(APPOINTMENT) : '')
+        + '" style="display:inline-flex;text-decoration:none;">'
+        + '<svg viewBox="0 0 24 24" fill="none" style="width:16px;height:16px;margin-right:6px;">'
+        + '<path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"'
+        + ' fill="#FFB800" stroke="#FFB800" stroke-width="1"/></svg>Rate Dr. '
+        + (APPOINTMENT ? '(via patient portal)' : 'your doctor') + '</a>';
       document.getElementById("btn-rebook").style.display = "inline-flex";
-      document.getElementById("btn-home").href = "/patient_access" + (APPOINTMENT ? "?consultation_ended=1&appointment=" + encodeURIComponent(APPOINTMENT) : "");
+      document.getElementById("btn-home").href = "/patient_access"
+        + (APPOINTMENT ? "?consultation_ended=1&appointment=" + encodeURIComponent(APPOINTMENT) : "");
     }
   }
 
-  // ── Rating ────────────────────────────────────────────────────────────────
+  // ── Rating (doctor-only clinical notes) ────────────────────────────────────
   var _selectedRating = 0;
 
   window.setRating = function (val) {
@@ -1067,30 +1226,30 @@
   };
 
   window.submitRating = function () {
-    if (_selectedRating === 0) return;
+    // For patients this function is not called (replaced by redirect link above).
+    // For doctors, save clinical note as practitioner rating comment on session.
+    var comment = (document.getElementById("rating-comment") || {}).value || "";
     var btn = document.getElementById("btn-submit-rating");
-    btn.disabled = true;
-    btn.innerHTML = '<div style="width:14px;height:14px;border:2px solid rgba(255,255,255,.5);border-top-color:white;border-radius:50%;animation:spin .8s linear infinite;display:inline-block;"></div>';
-
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = '<div style="width:14px;height:14px;border:2px solid rgba(255,255,255,.5);border-top-color:white;border-radius:50%;animation:spin .8s linear infinite;display:inline-block;"></div>';
+    }
     frappe.call({
       method: "airtook_video.airtook_video.api.submit_rating",
-      args: {
-        session_id:     SESSION_ID,
-        rating:         _selectedRating,
-        comment:        document.getElementById("rating-comment").value.trim(),
-        rated_by_role:  ROLE,
-      },
+      args: { session_id: SESSION_ID, rating: _selectedRating || 5, comment: comment, rated_by_role: ROLE },
       callback: function () {
-        document.getElementById("rating-section").style.opacity = "0.6";
-        document.getElementById("rating-section").style.pointerEvents = "none";
-        btn.style.display = "none";
-        document.getElementById("rating-submitted").style.display = "flex";
+        if (document.getElementById("rating-section")) {
+          document.getElementById("rating-section").style.opacity = "0.6";
+          document.getElementById("rating-section").style.pointerEvents = "none";
+        }
+        if (btn) btn.style.display = "none";
+        var sub = document.getElementById("rating-submitted");
+        if (sub) sub.style.display = "flex";
       },
       error: function () {
-        document.getElementById("rating-section").style.opacity = "0.6";
-        document.getElementById("rating-section").style.pointerEvents = "none";
-        btn.style.display = "none";
-        document.getElementById("rating-submitted").style.display = "flex";
+        if (btn) btn.style.display = "none";
+        var sub = document.getElementById("rating-submitted");
+        if (sub) sub.style.display = "flex";
       },
     });
   };

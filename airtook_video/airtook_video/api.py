@@ -771,10 +771,6 @@ def end_session(session_id, transcript=None):
                 paid_amount = _flt(
                     frappe.db.get_value("Patient Appointment", appt, "paid_amount") or 0
                 )
-                if paid_amount <= 0:
-                    paid_amount = _flt(
-                        frappe.db.get_value("Patient Appointment", appt, "custom_payment_amount") or 0
-                    )
                 if paid_amount > 0:
                     commission_pct = 20.0
                     try:
@@ -1052,6 +1048,30 @@ def check_pending_transcripts():
                 pass
 
 
+# ─── get_extension_fee ──────────────────────────────────────────────────────
+
+@frappe.whitelist(allow_guest=True, methods=["GET", "POST"])
+def get_extension_fee(session_id, extend_minutes):
+    """Return the discounted extension fee for a given session and duration."""
+    extend_minutes = int(extend_minutes or 15)
+    if extend_minutes not in (15, 30, 45, 60):
+        return {"fee": 0, "original": 0}
+    try:
+        doc = frappe.db.get_value(
+            SESSION_DTYPE, session_id, ["appointment"], as_dict=True
+        )
+        appt_type = None
+        if doc and doc.get("appointment"):
+            appt_type = frappe.db.get_value("Patient Appointment", doc["appointment"], "appointment_type")
+        per_min   = _get_fee_per_minute(appt_type)
+        gross     = round(per_min * extend_minutes, 2)
+        discount  = round(gross * EXTENSION_DISCOUNT_PCT / 100, 2)
+        fee       = round(gross - discount, 2)
+        return {"fee": int(fee), "original": int(gross)}
+    except Exception:
+        return {"fee": 0, "original": 0}
+
+
 # ─── extend_session ─────────────────────────────────────────────────────────
 
 @frappe.whitelist(methods=["POST"])
@@ -1061,8 +1081,8 @@ def extend_session(session_id, extend_minutes):
         frappe.throw("Missing session_id")
 
     extend_minutes = int(extend_minutes or 0)
-    if extend_minutes not in (15, 30):
-        frappe.throw("Extension must be 15 or 30 minutes", frappe.ValidationError)
+    if extend_minutes not in (15, 30, 45, 60):
+        frappe.throw("Extension must be 15, 30, 45 or 60 minutes", frappe.ValidationError)
 
     doc = frappe.get_doc(SESSION_DTYPE, session_id, ignore_permissions=True)
 
@@ -1161,17 +1181,16 @@ def submit_rating(session_id, rating, comment=None, rated_by_role=None):
     if not is_practitioner and not is_patient:
         frappe.throw(_("Not permitted"), frappe.PermissionError)
 
-    if is_patient and doc.practitioner:
+    if is_patient and doc.practitioner and doc.get("appointment"):
         try:
-            import importlib
-            core_api = importlib.import_module("airtook_core.api")
-            core_api.submit_doctor_rating(
-                doctor=doc.practitioner, rating=rating,
-                patient_user=current_user, session=session_id,
-                comment=comment or "", source="Video Call",
+            from airtook_core.api_dashboard import submit_doctor_rating
+            submit_doctor_rating(
+                appointment_name=doc.appointment,
+                rating=rating,
+                review_text=comment or "",
             )
         except Exception:
-            frappe.log_error(frappe.get_traceback(), "submit_rating failed")
+            frappe.log_error(frappe.get_traceback(), "submit_rating: delegate to submit_doctor_rating failed")
 
     if is_practitioner:
         if frappe.db.has_column(SESSION_DTYPE, "practitioner_rating"):
@@ -1222,3 +1241,114 @@ def relay_whiteboard_stroke(session_id, stroke_data):
         user=target
     )
     return {"ok": 1}
+
+
+# ─── auto_end_stale_sessions ──────────────────────────────────────────────────
+
+def auto_end_stale_sessions():
+    """
+    Cron: every 5 minutes (via airtook_core/hooks.py).
+    Finds AirTook Video Sessions that are 'active' but have been running past
+    their duration + 33 min grace.  Marks them completed, credits doctor earnings,
+    and enqueues the AI summary — handles the case where the doctor's browser
+    closed without calling end_session().
+    """
+    from frappe.utils import now_datetime, flt, get_datetime
+
+    now = now_datetime()
+    try:
+        stale = frappe.db.sql("""
+            SELECT name, appointment, practitioner, patient, started_at, duration_minutes
+            FROM `tabAirTook Video Session`
+            WHERE status = 'active'
+              AND started_at IS NOT NULL
+              AND TIMESTAMPADD(MINUTE, COALESCE(duration_minutes, 30) + 33, started_at) < %s
+        """, (now,), as_dict=True)
+    except Exception:
+        frappe.log_error(frappe.get_traceback(), "auto_end_stale_sessions: query failed")
+        return
+
+    for sess in stale:
+        try:
+            # Row-lock to prevent double processing
+            frappe.db.sql(
+                "SELECT name FROM `tabAirTook Video Session` WHERE name = %s FOR UPDATE",
+                sess["name"],
+            )
+            if frappe.db.get_value(SESSION_DTYPE, sess["name"], "status") != "active":
+                frappe.db.commit()
+                continue
+
+            frappe.db.set_value(SESSION_DTYPE, sess["name"], {
+                "status": "completed",
+                "ended_at": now,
+            }, update_modified=False)
+
+            if sess.get("appointment"):
+                frappe.db.set_value(
+                    "Patient Appointment", sess["appointment"], "status", "Closed",
+                    update_modified=False,
+                )
+
+            # Credit doctor earnings
+            if sess.get("practitioner") and sess.get("appointment"):
+                try:
+                    paid_amount = flt(
+                        frappe.db.get_value("Patient Appointment", sess["appointment"], "paid_amount") or 0
+                    )
+                    if paid_amount > 0:
+                        commission_pct = 20.0
+                        try:
+                            cp = frappe.db.get_value("AirTook Setting", "platform_commission_pct", "setting_value")
+                            if cp:
+                                commission_pct = flt(cp)
+                        except Exception:
+                            pass
+                        doctor_cut = round(paid_amount * (100.0 - commission_pct) / 100, 2)
+                        if doctor_cut > 0:
+                            frappe.db.sql(
+                                "SELECT name FROM `tabHealthcare Practitioner` WHERE name = %s FOR UPDATE",
+                                sess["practitioner"],
+                            )
+                            current_earn = flt(
+                                frappe.db.get_value(
+                                    "Healthcare Practitioner", sess["practitioner"],
+                                    "custom_earnings_balance",
+                                ) or 0
+                            )
+                            frappe.db.set_value(
+                                "Healthcare Practitioner", sess["practitioner"],
+                                "custom_earnings_balance", current_earn + doctor_cut,
+                                update_modified=False,
+                            )
+                            frappe.logger().info(
+                                f"auto_end_stale_sessions: credited ₦{doctor_cut} to "
+                                f"{sess['practitioner']} for stale session {sess['name']}"
+                            )
+                except Exception:
+                    frappe.log_error(
+                        frappe.get_traceback(),
+                        f"auto_end_stale_sessions: earnings credit failed for {sess['name']}",
+                    )
+
+            frappe.db.commit()
+
+            # Enqueue AI summary
+            if sess.get("appointment"):
+                try:
+                    import frappe.utils.background_jobs as _bj
+                    _bj.enqueue(
+                        "airtook_core.api_dashboard.generate_consultation_summary",
+                        appointment_name=sess["appointment"],
+                        queue="short", timeout=60,
+                    )
+                except Exception:
+                    pass
+
+        except Exception:
+            frappe.db.rollback()
+            frappe.log_error(
+                frappe.get_traceback(),
+                f"auto_end_stale_sessions: failed for {sess.get('name')}",
+            )
+            continue
